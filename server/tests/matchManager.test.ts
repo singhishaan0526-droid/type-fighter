@@ -324,4 +324,192 @@ describe('MatchManager', () => {
     expect(manager.getSession('room-cleanup')).toBeUndefined();
     expect(manager.getSessionBySocket('socket-1')).toBeUndefined();
   });
+
+  it('completes match immediately when a player finishes the full sentence', () => {
+    const { session } = manager.joinSession('room-sentence-win', 'socket-1', 'byte');
+    manager.joinSession('room-sentence-win', 'socket-2', 'glitch');
+    session.phase = 'battle';
+    session.startTime = Date.now();
+    session.challengeText = 'Go';
+    session.challengeId = 'ch-go';
+
+    // Type 'G'
+    const res1 = manager.processTypingInput('socket-1', {
+      seq: 1,
+      challengeId: 'ch-go',
+      index: 0,
+      char: 'G',
+      timestamp: Date.now()
+    });
+    expect(res1.valid).toBe(true);
+    expect(res1.matchFinished).toBe(false);
+
+    // Type 'o' (finishes sentence)
+    const res2 = manager.processTypingInput('socket-1', {
+      seq: 2,
+      challengeId: 'ch-go',
+      index: 1,
+      char: 'o',
+      timestamp: Date.now()
+    });
+    expect(res2.valid).toBe(true);
+    expect(res2.matchFinished).toBe(true);
+    expect(session.phase).toBe('finished');
+    expect(session.winner).toBe('player1');
+    expect(session.finishReason).toBe('completion');
+    // Challenge is NOT replaced
+    expect(session.challengeId).toBe('ch-go');
+    expect(session.challengeText).toBe('Go');
+  });
+
+  it('rejects typing input after match completion', () => {
+    const { session } = manager.joinSession('room-reject-finished', 'socket-1', 'byte');
+    manager.joinSession('room-reject-finished', 'socket-2', 'glitch');
+    session.phase = 'battle';
+    session.startTime = Date.now();
+    session.challengeText = 'Hi';
+    session.challengeId = 'ch-hi';
+
+    // Finish match
+    manager.finishMatch(session.sessionId, 'player1', 'completion');
+    expect(session.phase).toBe('finished');
+
+    // Attempt typing after completion
+    const postFinishResult = manager.processTypingInput('socket-2', {
+      seq: 1,
+      challengeId: 'ch-hi',
+      index: 0,
+      char: 'H',
+      timestamp: Date.now()
+    });
+    expect(postFinishResult.valid).toBe(false);
+    expect(postFinishResult.errorCode).toBe('INVALID_STATE');
+  });
+
+  it('immediately awards victory on knockout', () => {
+    const { session } = manager.joinSession('room-ko', 'socket-1', 'byte');
+    manager.joinSession('room-ko', 'socket-2', 'glitch');
+    session.phase = 'battle';
+    session.startTime = Date.now();
+    session.challengeText = 'Strike hard and fast';
+    session.challengeId = 'ch-strike';
+
+    // Set opponent HP to very low so one word knocks them out
+    session.p2!.currentHp = 1;
+    session.p2!.shieldHp = 0;
+
+    // Type 'Strike '
+    const word = 'Strike ';
+    let lastRes;
+    for (let i = 0; i < word.length; i++) {
+      lastRes = manager.processTypingInput('socket-1', {
+        seq: i + 1,
+        challengeId: 'ch-strike',
+        index: i,
+        char: word[i],
+        timestamp: Date.now()
+      });
+    }
+
+    expect(lastRes?.valid).toBe(true);
+    expect(lastRes?.matchFinished).toBe(true);
+    expect(session.phase).toBe('finished');
+    expect(session.winner).toBe('player1');
+    expect(session.finishReason).toBe('knockout');
+    expect(session.p2?.currentHp).toBe(0);
+  });
+
+  it('evaluates timeout using weighted formula S = 0.50P + 0.30A + 0.20H', () => {
+    const { session } = manager.joinSession('room-timeout-weight', 'socket-1', 'byte');
+    manager.joinSession('room-timeout-weight', 'socket-2', 'glitch');
+    session.phase = 'battle';
+    session.challengeText = 'A'.repeat(100);
+
+    // Player 1: 80% progress, 90% accuracy, 30 HP -> 40 + 27 + 6 = 73
+    session.p1!.currentTypedIndex = 80;
+    session.p1!.accuracy = 90;
+    session.p1!.currentHp = 30;
+    session.p1!.maxHp = 100;
+
+    // Player 2: 20% progress, 70% accuracy, 90 HP -> 10 + 21 + 18 = 49
+    session.p2!.currentTypedIndex = 20;
+    session.p2!.accuracy = 70;
+    session.p2!.currentHp = 90;
+    session.p2!.maxHp = 100;
+
+    const finished = manager.evaluateTimeoutWinner('room-timeout-weight');
+    expect(finished?.winner).toBe('player1');
+    expect(finished?.finishReason).toBe('timeout');
+  });
+
+  it('returns draw on timeout when weighted scores are equal', () => {
+    const { session } = manager.joinSession('room-timeout-draw', 'socket-1', 'byte');
+    manager.joinSession('room-timeout-draw', 'socket-2', 'glitch');
+    session.phase = 'battle';
+    session.challengeText = 'A'.repeat(100);
+
+    // Both players have identical progress, accuracy, HP
+    session.p1!.currentTypedIndex = 50;
+    session.p1!.accuracy = 85;
+    session.p1!.currentHp = 60;
+    session.p1!.maxHp = 100;
+
+    session.p2!.currentTypedIndex = 50;
+    session.p2!.accuracy = 85;
+    session.p2!.currentHp = 60;
+    session.p2!.maxHp = 100;
+
+    const finished = manager.evaluateTimeoutWinner('room-timeout-draw');
+    expect(finished?.winner).toBe('draw');
+    expect(finished?.finishReason).toBe('timeout');
+  });
+
+  it('prevents duplicate finish or timeout from overwriting result', () => {
+    const { session } = manager.joinSession('room-no-overwrite', 'socket-1', 'byte');
+    manager.joinSession('room-no-overwrite', 'socket-2', 'glitch');
+    session.phase = 'battle';
+
+    // Knockout occurs first
+    manager.finishMatch('room-no-overwrite', 'player1', 'knockout');
+    expect(session.winner).toBe('player1');
+    expect(session.finishReason).toBe('knockout');
+
+    // Attempt second finish with timeout
+    const secondCall = manager.finishMatch('room-no-overwrite', 'player2', 'timeout');
+    expect(secondCall?.winner).toBe('player1');
+    expect(secondCall?.finishReason).toBe('knockout');
+
+    // evaluateTimeoutWinner returns null when already finished
+    const timeoutCall = manager.evaluateTimeoutWinner('room-no-overwrite');
+    expect(timeoutCall).toBeNull();
+  });
+
+  it('resets player and session state cleanly for rematch', () => {
+    const { session } = manager.joinSession('room-rematch', 'socket-1', 'byte');
+    manager.joinSession('room-rematch', 'socket-2', 'glitch');
+    session.phase = 'battle';
+    session.p1!.currentHp = 30;
+    session.p1!.damageDealt = 75;
+    session.p1!.combo = 8;
+    session.p1!.currentTypedIndex = 25;
+
+    // Finish match
+    manager.finishMatch('room-rematch', 'player1', 'completion');
+    expect(session.phase).toBe('finished');
+
+    // Player 1 signals ready for rematch
+    const res1 = manager.setReady('socket-1', true);
+    expect(session.phase).toBe('ready');
+    expect(session.winner).toBeNull();
+    expect(session.finishReason).toBeNull();
+    expect(session.p1?.currentHp).toBe(100);
+    expect(session.p1?.combo).toBe(0);
+    expect(session.p1?.damageDealt).toBe(0);
+    expect(session.p1?.currentTypedIndex).toBe(0);
+    expect(res1.bothReady).toBe(false);
+
+    // Player 2 signals ready
+    const res2 = manager.setReady('socket-2', true);
+    expect(res2.bothReady).toBe(true);
+  });
 });

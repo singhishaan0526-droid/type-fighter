@@ -452,10 +452,16 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       // Visual matching for local input field
       const isCorrect = currentSentence[nextCharIndex] === typedChar;
       setHasInputError(!isCorrect);
-      if (!isCorrect) sound.playError();
+      if (!isCorrect) {
+        sound.playError();
+        setTimeout(() => setHasInputError(false), 250);
+      } else {
+        setUserInput(currentSentence.slice(0, nextCharIndex + 1));
+      }
+    } else if (val.length < userInput.length) {
+      setUserInput(val);
+      setHasInputError(false);
     }
-
-    setUserInput(val);
   };
 
   return (

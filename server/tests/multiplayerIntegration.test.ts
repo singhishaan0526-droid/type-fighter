@@ -160,4 +160,66 @@ describe('Multiplayer Core Integration Tests', () => {
 
     client2Resumed.disconnect();
   });
+
+  it('delivers consistent final result and statistics to both online players upon sentence completion', async () => {
+    const serverUrl = `http://localhost:${port}`;
+    const p1 = ioClient(serverUrl, { reconnection: false });
+    const p2 = ioClient(serverUrl, { reconnection: false });
+
+    await Promise.all([
+      new Promise<void>((res) => p1.on('connect', res)),
+      new Promise<void>((res) => p2.on('connect', res))
+    ]);
+
+    const sessionId = `finish-test-${Date.now()}`;
+
+    // Join
+    const p1StatePromise = new Promise<MatchStateSnapshot>((res) => p1.once('match:state', res));
+    p1.emit('match:join', { sessionId, characterId: 'byte' });
+    await p1StatePromise;
+
+    const p2StatePromise = new Promise<MatchStateSnapshot>((res) => p2.once('match:state', res));
+    p2.emit('match:join', { sessionId, characterId: 'glitch' });
+    await p2StatePromise;
+
+    // Ready
+    const start1Promise = new Promise<MatchStartedEvent>((res) => p1.once('match:started', res));
+    const start2Promise = new Promise<MatchStartedEvent>((res) => p2.once('match:started', res));
+    p1.emit('match:ready', { ready: true });
+    p2.emit('match:ready', { ready: true });
+
+    const [start1] = await Promise.all([start1Promise, start2Promise]);
+
+    // Track match:finished on both clients
+    const finish1Promise = new Promise<MatchFinishedEvent>((res) => p1.once('match:finished', res));
+    const finish2Promise = new Promise<MatchFinishedEvent>((res) => p2.once('match:finished', res));
+
+    // Set a short target challenge so it finishes within rate limits (< 30 keystrokes/sec)
+    const session = matchManager.getSession(sessionId)!;
+    session.challengeText = 'Fast win';
+    const fullText = session.challengeText;
+    for (let i = 0; i < fullText.length; i++) {
+      p1.emit('typing:input', {
+        seq: i + 1,
+        challengeId: start1.challengeId,
+        index: i,
+        char: fullText[i],
+        timestamp: Date.now()
+      });
+    }
+
+    const [finish1, finish2] = await Promise.all([finish1Promise, finish2Promise]);
+
+    // Both players receive identical winner, reason, and statistics
+    expect(finish1.winner).toBe('player1');
+    expect(finish2.winner).toBe('player1');
+    expect(finish1.reason).toBe('completion');
+    expect(finish2.reason).toBe('completion');
+    expect(finish1.p1Stats.accuracy).toBe(finish2.p1Stats.accuracy);
+    expect(finish1.p1Stats.wpm).toBe(finish2.p1Stats.wpm);
+    expect(finish1.p2Stats.damageDealt).toBe(finish2.p2Stats.damageDealt);
+
+    p1.disconnect();
+    p2.disconnect();
+  }, 15000);
 });

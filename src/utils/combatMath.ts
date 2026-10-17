@@ -58,23 +58,41 @@ export function applyMistakePenalty(currentCombo: number): number {
   return Math.floor(currentCombo / 2);
 }
 
+export function calculateTimeoutScore(
+  progressPercent: number,
+  accuracy: number,
+  healthPercent: number
+): number {
+  const p = Math.min(100, Math.max(0, progressPercent));
+  const a = Math.min(100, Math.max(0, accuracy));
+  const h = Math.min(100, Math.max(0, healthPercent));
+  const score = 0.50 * p + 0.30 * a + 0.20 * h;
+  return Math.round(score * 10000) / 10000;
+}
+
 export function evaluateWinner(
   p1Hp: number,
   p1Accuracy: number,
   p2Hp: number,
-  p2Accuracy: number
+  p2Accuracy: number,
+  p1Progress: number = 0,
+  p2Progress: number = 0,
+  p1MaxHp: number = 100,
+  p2MaxHp: number = 100
 ): 'player1' | 'player2' | 'draw' {
   if (p1Hp <= 0 && p2Hp <= 0) return 'draw';
   if (p1Hp <= 0) return 'player2';
   if (p2Hp <= 0) return 'player1';
 
-  // If time runs out:
-  if (p1Hp > p2Hp) return 'player1';
-  if (p2Hp > p1Hp) return 'player2';
+  // Timeout scoring: S = 0.50P + 0.30A + 0.20H
+  const p1HpPercent = p1MaxHp > 0 ? (p1Hp / p1MaxHp) * 100 : 0;
+  const p2HpPercent = p2MaxHp > 0 ? (p2Hp / p2MaxHp) * 100 : 0;
 
-  // Tie-breaker: Accuracy
-  if (p1Accuracy > p2Accuracy) return 'player1';
-  if (p2Accuracy > p1Accuracy) return 'player2';
+  const score1 = calculateTimeoutScore(p1Progress, p1Accuracy, p1HpPercent);
+  const score2 = calculateTimeoutScore(p2Progress, p2Accuracy, p2HpPercent);
 
+  if (score1 > score2) return 'player1';
+  if (score2 > score1) return 'player2';
   return 'draw';
 }
+

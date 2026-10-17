@@ -48,7 +48,7 @@ export interface MatchSession {
   durationSeconds: number;
   timeLeft: number;
   winner: 'player1' | 'player2' | 'draw' | null;
-  finishReason: 'knockout' | 'timeout' | 'forfeit' | null;
+  finishReason: 'knockout' | 'timeout' | 'forfeit' | 'completion' | null;
   // Timers
   countdownTimer: ReturnType<typeof setInterval> | null;
   matchTimer: ReturnType<typeof setInterval> | null;
@@ -179,7 +179,7 @@ export interface MatchFinishedEvent {
   winner: 'player1' | 'player2' | 'draw';
   p1Stats: PlayerStatsSnapshot;
   p2Stats: PlayerStatsSnapshot;
-  reason: 'knockout' | 'timeout' | 'forfeit';
+  reason: 'knockout' | 'timeout' | 'forfeit' | 'completion';
   elapsedSeconds: number;
 }
 

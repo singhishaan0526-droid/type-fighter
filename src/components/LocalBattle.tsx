@@ -1,12 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { Character, FighterState, GameMode, BotDifficulty, BattleResult, FloatingText, Particle } from '../types/game';
-import { getRandomSentence } from '../data/sentences';
 import { sound } from '../utils/sound';
 import {
   calculateWpm,
-  calculateAccuracy,
   calculateWordDamage,
-  applyMistakePenalty,
   evaluateWinner
 } from '../utils/combatMath';
 import { BattleHUD } from './BattleHUD';
@@ -15,6 +12,7 @@ import { TypingConsole } from './TypingConsole';
 import { BattleResultModal } from './BattleResultModal';
 import { CHARACTER_ULTIMATES } from '../types/abilities';
 import { saveMatchRecord } from '../utils/recordManager';
+import { processTypingInput } from '../utils/typingEngine';
 
 interface LocalBattleProps {
   p1Character: Character;
@@ -114,6 +112,17 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
   const startTimeRef = useRef<number>(Date.now());
   const lastTypedWordIndexRef = useRef<number>(0);
   const botComboRef = useRef<number>(0);
+  const isBattleFinishedRef = useRef<boolean>(false);
+  const maxCorrectIndexRef = useRef<number>(0);
+
+  const p1StateRef = useRef<FighterState>(p1State);
+  p1StateRef.current = p1State;
+  const p2StateRef = useRef<FighterState>(p2State);
+  p2StateRef.current = p2State;
+  const currentSentenceRef = useRef<string>(currentSentence);
+  currentSentenceRef.current = currentSentence;
+  const userInputRef = useRef<string>(userInput);
+  userInputRef.current = userInput;
 
   // Spawn visual FX helper
   const triggerImpactFX = useCallback((
@@ -166,8 +175,14 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
 
   // End Battle and compute results
   const finishBattle = useCallback((winner: 'player1' | 'player2' | 'draw') => {
+    if (isBattleFinishedRef.current) return;
+    isBattleFinishedRef.current = true;
+    setMatchActive(false);
+
     const elapsedSeconds = Math.max(1, Math.round((Date.now() - startTimeRef.current) / 1000));
-    
+    const currentP1 = p1StateRef.current;
+    const currentP2 = p2StateRef.current;
+
     // Set victory/defeat animations
     setP1State(prev => ({
       ...prev,
@@ -181,16 +196,16 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     setBattleResult({
       winner,
       p1Stats: {
-        wpm: p1State.wpm,
-        accuracy: p1State.accuracy,
-        maxCombo: p1State.maxCombo,
-        damageDealt: p1State.damageDealt
+        wpm: currentP1.wpm,
+        accuracy: currentP1.accuracy,
+        maxCombo: currentP1.maxCombo,
+        damageDealt: currentP1.damageDealt
       },
       p2Stats: {
-        wpm: p2State.wpm,
-        accuracy: p2State.accuracy,
-        maxCombo: p2State.maxCombo,
-        damageDealt: p2State.damageDealt
+        wpm: currentP2.wpm,
+        accuracy: currentP2.accuracy,
+        maxCombo: currentP2.maxCombo,
+        damageDealt: currentP2.damageDealt
       },
       elapsedSeconds
     });
@@ -201,48 +216,55 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
         playerCharacterId: p1Character.id,
         opponentCharacterId: p2Character.id,
         winner,
-        playerWpm: p1State.wpm,
-        opponentWpm: p2State.wpm,
-        playerAccuracy: p1State.accuracy,
-        playerMaxCombo: p1State.maxCombo,
-        playerDamage: p1State.damageDealt,
+        playerWpm: currentP1.wpm,
+        opponentWpm: currentP2.wpm,
+        playerAccuracy: currentP1.accuracy,
+        playerMaxCombo: currentP1.maxCombo,
+        playerDamage: currentP1.damageDealt,
         difficulty,
         mode
       });
     } catch {
       // safe guard
     }
-
-    setMatchActive(false);
-  }, [p1State, p2State, p1Character.id, p2Character.id, difficulty, mode]);
+  }, [p1Character.id, p2Character.id, difficulty, mode]);
 
   // Check HP thresholds
   useEffect(() => {
-    if (!matchActive || battleResult) return;
+    if (!matchActive || isBattleFinishedRef.current || battleResult) return;
 
     if (p2State.currentHp <= 0) {
-      setMatchActive(false);
       finishBattle('player1');
     } else if (p1State.currentHp <= 0) {
-      setMatchActive(false);
       finishBattle('player2');
     }
   }, [matchActive, p1State.currentHp, p2State.currentHp, battleResult, finishBattle]);
 
   // Battle Countdown Timer
   useEffect(() => {
-    if (battleResult || countdown !== null) return;
+    if (battleResult || countdown !== null || !matchActive) return;
 
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          // Evaluate winner on time out
+          const p1 = p1StateRef.current;
+          const p2 = p2StateRef.current;
+          const sentence = currentSentenceRef.current;
+          const input = userInputRef.current;
+          const sentenceLen = sentence.length || 1;
+          const p1Progress = (input.length / sentenceLen) * 100;
+          const p2Progress = (p2.correctKeystrokes / sentenceLen) * 100;
+
           const winner = evaluateWinner(
-            p1State.currentHp,
-            p1State.accuracy,
-            p2State.currentHp,
-            p2State.accuracy
+            p1.currentHp,
+            p1.accuracy,
+            p2.currentHp,
+            p2.accuracy,
+            p1Progress,
+            p2Progress,
+            p1.maxHp,
+            p2.maxHp
           );
           finishBattle(winner);
           return 0;
@@ -252,7 +274,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [battleResult, countdown, p1State, p2State, finishBattle]);
+  }, [battleResult, countdown, matchActive, finishBattle]);
 
   // Particle physics update loop
   useEffect(() => {
@@ -277,7 +299,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
 
   // Shadow Bot Combat AI (in 'vs-bot' mode)
   useEffect(() => {
-    if (mode !== 'vs-bot' || battleResult || countdown !== null) return;
+    if (mode !== 'vs-bot' || battleResult || isBattleFinishedRef.current || !matchActive || countdown !== null) return;
 
     // Difficulty tuning
     const config = {
@@ -291,12 +313,12 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     let botTimeoutId: ReturnType<typeof setTimeout>;
 
     const botAttackStep = () => {
-      if (!isMounted || battleResult) return;
+      if (!isMounted || battleResult || isBattleFinishedRef.current || !matchActive) return;
 
       const delay = Math.random() * (config.intervalMax - config.intervalMin) + config.intervalMin;
 
       botTimeoutId = setTimeout(() => {
-        if (!isMounted || battleResult) return;
+        if (!isMounted || battleResult || isBattleFinishedRef.current || !matchActive) return;
 
         // Bot word strike (skip if frozen)
         if (p2State.isFrozen) {
@@ -314,13 +336,16 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
         // Animate Bot attack & Player 1 hit with shield absorption
         setP2State((prev) => {
           const nextCombo = prev.combo + 1;
+          const nextCorrect = prev.correctKeystrokes + botWordLen + 1;
           return {
             ...prev,
             animation: 'attack',
             combo: nextCombo,
             maxCombo: Math.max(prev.maxCombo, nextCombo),
             wpm: config.targetWpm + Math.floor(Math.random() * 6 - 3),
-            damageDealt: prev.damageDealt + finalDamage
+            damageDealt: prev.damageDealt + finalDamage,
+            correctKeystrokes: nextCorrect,
+            totalKeystrokes: Math.round(nextCorrect / 0.94)
           };
         });
 
@@ -372,7 +397,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
       isMounted = false;
       clearTimeout(botTimeoutId);
     };
-  }, [mode, difficulty, battleResult, countdown, p2Character, p2State.isFrozen, triggerImpactFX, triggerScreenShake]);
+  }, [mode, difficulty, battleResult, countdown, matchActive, p2Character, p2State.isFrozen, triggerImpactFX, triggerScreenShake]);
 
   // Execute Player 1 attack when a word is completed
   const executePlayerStrike = useCallback((word: string, isEndOfSentence: boolean = false) => {
@@ -566,92 +591,78 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
 
   // Handle Player 1 Typing Input
   const handleInputChange = (value: string) => {
-    if (battleResult) return;
+    if (battleResult || isBattleFinishedRef.current || !matchActive) return;
 
     const prevLength = userInput.length;
-    const isBackspace = value.length < prevLength;
     const elapsedSecs = Math.max(1, (Date.now() - startTimeRef.current) / 1000);
 
-    // Keystroke sound
-    if (!isBackspace) {
-      sound.playKeyClick();
-    }
+    const result = processTypingInput(
+      value,
+      currentSentence,
+      {
+        userInput,
+        maxCorrectIndex: maxCorrectIndexRef.current,
+        correctKeystrokes: p1State.correctKeystrokes,
+        totalKeystrokes: p1State.totalKeystrokes,
+        mistakes: p1State.mistakes,
+        combo: p1State.combo,
+        accuracy: p1State.accuracy,
+        wpm: p1State.wpm,
+        hasInputError
+      },
+      elapsedSecs,
+      lastTypedWordIndexRef.current
+    );
 
-    // Validate substring against target sentence
-    const isMatching = currentSentence.startsWith(value);
+    setUserInput(result.nextState.userInput);
+    maxCorrectIndexRef.current = result.nextState.maxCorrectIndex;
+    setHasInputError(result.nextState.hasInputError);
 
-    if (!isMatching) {
-      // Mistake detected
+    if (result.isMistake) {
       sound.playError();
-      setHasInputError(true);
-
-      setP1State((prev) => {
-        const nextMistakes = prev.mistakes + 1;
-        const total = prev.totalKeystrokes + 1;
-        const reducedCombo = applyMistakePenalty(prev.combo);
-
-        return {
-          ...prev,
-          mistakes: nextMistakes,
-          totalKeystrokes: total,
-          combo: reducedCombo,
-          accuracy: calculateAccuracy(prev.correctKeystrokes, total)
-        };
-      });
-
       triggerImpactFX('p1', 'MISS', 'miss', '#ff2a5f');
-
       setTimeout(() => setHasInputError(false), 250);
-      setUserInput(value);
+      setP1State((prev) => ({
+        ...prev,
+        mistakes: result.nextState.mistakes,
+        totalKeystrokes: result.nextState.totalKeystrokes,
+        combo: result.nextState.combo,
+        accuracy: result.nextState.accuracy
+      }));
       return;
     }
 
-    // Input is correct prefix so far
-    setHasInputError(false);
-    setUserInput(value);
-
-    // Keystroke statistics update
-    const addedChars = Math.max(0, value.length - prevLength);
-    setP1State((prev) => {
-      const correct = prev.correctKeystrokes + addedChars;
-      const total = prev.totalKeystrokes + addedChars;
-      return {
-        ...prev,
-        correctKeystrokes: correct,
-        totalKeystrokes: total,
-        accuracy: calculateAccuracy(correct, total),
-        wpm: calculateWpm(correct, elapsedSecs)
-      };
-    });
-
-    // Check if a space was typed or word completed
-    if (value.endsWith(' ') || value === currentSentence) {
-      const words = value.trim().split(/\s+/);
-      const currentWordIdx = words.length - 1;
-
-      if (currentWordIdx >= lastTypedWordIndexRef.current) {
-        const completedWord = words[currentWordIdx];
-        if (completedWord) {
-          executePlayerStrike(completedWord, value === currentSentence);
-        }
-        lastTypedWordIndexRef.current = currentWordIdx + 1;
-      }
+    if (value.length > prevLength) {
+      sound.playKeyClick();
     }
 
-    // Check if entire sentence is completed!
-    if (value === currentSentence) {
-      // Transition to next sentence
-      setTimeout(() => {
-        const nextSentence = getRandomSentence(currentSentence);
-        setCurrentSentence(nextSentence);
-        setUserInput('');
-        lastTypedWordIndexRef.current = 0;
-      }, 200);
+    setP1State((prev) => ({
+      ...prev,
+      correctKeystrokes: result.nextState.correctKeystrokes,
+      totalKeystrokes: result.nextState.totalKeystrokes,
+      accuracy: result.nextState.accuracy,
+      wpm: result.nextState.wpm
+    }));
+
+    if (result.isCompletedWord && result.completedWord) {
+      executePlayerStrike(result.completedWord, result.isSentenceCompleted);
+      const words = result.nextState.userInput.trim().split(/\s+/);
+      lastTypedWordIndexRef.current = words.length;
+    }
+
+    if (result.isSentenceCompleted) {
+      finishBattle('player1');
     }
   };
 
   // Rematch Handler
   const handleRematch = () => {
+    isBattleFinishedRef.current = false;
+    maxCorrectIndexRef.current = 0;
+    lastTypedWordIndexRef.current = 0;
+    botComboRef.current = 0;
+    startTimeRef.current = Date.now();
+
     setP1State((prev) => ({
       ...prev,
       currentHp: 100,
@@ -695,9 +706,6 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     setCountdown(3);
     setFloatingTexts([]);
     setParticles([]);
-    lastTypedWordIndexRef.current = 0;
-    botComboRef.current = 0;
-    startTimeRef.current = Date.now();
     setBattleResult(null);
     setMatchActive(true);
     window.scrollTo({ top: 0, behavior: 'instant' });

@@ -33,6 +33,13 @@ export const TypingConsole: React.FC<TypingConsoleProps> = ({
     }
   }, [disabled]);
 
+  // Ensure controlled input stays synchronized when invalid input is rejected
+  useEffect(() => {
+    if (inputRef.current && inputRef.current.value !== userInput) {
+      inputRef.current.value = userInput;
+    }
+  }, [userInput, hasError]);
+
   // Keep input focused when clicking anywhere in console
   const handleContainerClick = () => {
     if (!disabled && inputRef.current) {

@@ -165,6 +165,10 @@ export class MatchManager {
     if (!mapping) throw new Error('NOT_IN_SESSION');
     const { session, slot } = mapping;
 
+    if (session.phase === 'finished') {
+      this.resetSessionForRematch(session);
+    }
+
     if (session.phase !== 'waiting' && session.phase !== 'ready') {
       throw new Error('INVALID_SESSION_STATE');
     }
@@ -176,6 +180,48 @@ export class MatchManager {
 
     const bothReady = !!(session.p1?.isReady && session.p2?.isReady);
     return { session, slot, bothReady };
+  }
+
+  public resetSessionForRematch(session: MatchSession): void {
+    const nextChallenge = getRandomChallenge(session.challengeId);
+    session.challengeId = nextChallenge.id;
+    session.challengeText = nextChallenge.text;
+    session.phase = session.p1 && session.p2 ? 'ready' : 'waiting';
+    session.winner = null;
+    session.finishReason = null;
+    session.startTime = null;
+    session.timeLeft = session.durationSeconds;
+
+    if (session.countdownTimer) {
+      clearInterval(session.countdownTimer);
+      session.countdownTimer = null;
+    }
+    if (session.matchTimer) {
+      clearInterval(session.matchTimer);
+      session.matchTimer = null;
+    }
+
+    const resetPlayer = (p: PlayerSessionState) => {
+      p.isReady = false;
+      p.currentHp = p.maxHp;
+      p.shieldHp = 0;
+      p.combo = 0;
+      p.maxCombo = 0;
+      p.correctKeystrokes = 0;
+      p.totalKeystrokes = 0;
+      p.mistakes = 0;
+      p.damageDealt = 0;
+      p.wpm = 0;
+      p.accuracy = 100;
+      p.currentTypedIndex = 0;
+      p.lastSeq = 0;
+      p.lastInputTimestamp = 0;
+      p.inputCountWindow = 0;
+      p.windowStartTime = Date.now();
+    };
+
+    if (session.p1) resetPlayer(session.p1);
+    if (session.p2) resetPlayer(session.p2);
   }
 
   public startCountdown(
@@ -368,15 +414,9 @@ export class MatchManager {
         if (opponent.currentHp <= 0) {
           matchFinished = true;
           this.finishMatch(session.sessionId, slot, 'knockout');
-        }
-
-        // If end of sentence reached and opponent not knocked out, advance to next sentence
-        if (isEndOfSentence && !matchFinished) {
-          const nextChallenge = getRandomChallenge(session.challengeId);
-          session.challengeId = nextChallenge.id;
-          session.challengeText = nextChallenge.text;
-          player.currentTypedIndex = 0;
-          opponent.currentTypedIndex = 0;
+        } else if (isEndOfSentence) {
+          matchFinished = true;
+          this.finishMatch(session.sessionId, slot, 'completion');
         }
       }
     } else {
@@ -482,10 +522,14 @@ export class MatchManager {
   public finishMatch(
     sessionId: string,
     winner: 'player1' | 'player2' | 'draw',
-    reason: 'knockout' | 'timeout' | 'forfeit'
+    reason: 'knockout' | 'timeout' | 'forfeit' | 'completion'
   ): MatchSession | null {
     const session = this.sessions.get(sessionId);
     if (!session) return null;
+
+    if (session.phase === 'finished') {
+      return session;
+    }
 
     if (session.countdownTimer) {
       clearInterval(session.countdownTimer);
@@ -513,13 +557,21 @@ export class MatchManager {
 
   public evaluateTimeoutWinner(sessionId: string): MatchSession | null {
     const session = this.sessions.get(sessionId);
-    if (!session || !session.p1 || !session.p2) return null;
+    if (!session || !session.p1 || !session.p2 || session.phase === 'finished') return null;
+
+    const sentenceLen = session.challengeText.length || 1;
+    const p1Progress = (session.p1.currentTypedIndex / sentenceLen) * 100;
+    const p2Progress = (session.p2.currentTypedIndex / sentenceLen) * 100;
 
     const winner = evaluateWinner(
       session.p1.currentHp,
       session.p1.accuracy,
       session.p2.currentHp,
-      session.p2.accuracy
+      session.p2.accuracy,
+      p1Progress,
+      p2Progress,
+      session.p1.maxHp,
+      session.p2.maxHp
     );
 
     return this.finishMatch(sessionId, winner, 'timeout');

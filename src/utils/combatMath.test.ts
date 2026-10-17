@@ -4,6 +4,7 @@ import {
   calculateAccuracy,
   calculateWordDamage,
   applyMistakePenalty,
+  calculateTimeoutScore,
   evaluateWinner
 } from './combatMath';
 import { CHARACTERS, getCharacterById } from '../data/characters';
@@ -74,26 +75,62 @@ describe('Typing Combat Engine - combatMath', () => {
     });
   });
 
+  describe('calculateTimeoutScore', () => {
+    it('calculates weighted score S = 0.50P + 0.30A + 0.20H accurately', () => {
+      // P = 100, A = 100, H = 100 -> 50 + 30 + 20 = 100
+      expect(calculateTimeoutScore(100, 100, 100)).toBe(100);
+      // P = 60, A = 90, H = 50 -> 30 + 27 + 10 = 67
+      expect(calculateTimeoutScore(60, 90, 50)).toBe(67);
+      // P = 0, A = 0, H = 0 -> 0
+      expect(calculateTimeoutScore(0, 0, 0)).toBe(0);
+    });
+
+    it('clamps P, A, and H inputs to [0, 100]', () => {
+      // Over 100 clamped to 100
+      expect(calculateTimeoutScore(150, 120, 200)).toBe(100);
+      // Negative clamped to 0
+      expect(calculateTimeoutScore(-20, -50, -10)).toBe(0);
+    });
+  });
+
   describe('evaluateWinner', () => {
-    it('declares p1 winner if p2 HP is 0', () => {
+    it('declares p1 winner immediately if p2 is knocked out (HP <= 0)', () => {
       expect(evaluateWinner(50, 95, 0, 80)).toBe('player1');
+      // Even if p2 has higher progress and accuracy, knockout is immediate loss
+      expect(evaluateWinner(10, 50, 0, 100, 20, 99)).toBe('player1');
     });
 
-    it('declares p2 winner if p1 HP is 0', () => {
+    it('declares p2 winner immediately if p1 is knocked out (HP <= 0)', () => {
       expect(evaluateWinner(0, 95, 45, 80)).toBe('player2');
+      // Even if p1 has higher progress and accuracy, knockout is immediate loss
+      expect(evaluateWinner(0, 100, 10, 50, 99, 20)).toBe('player2');
     });
 
-    it('on timeout, player with higher HP wins', () => {
+    it('declares draw if both players reach 0 HP simultaneously', () => {
+      expect(evaluateWinner(0, 95, 0, 90)).toBe('draw');
+    });
+
+    it('on timeout, uses weighted score S = 0.50P + 0.30A + 0.20H rather than pure HP', () => {
+      // P1: HP = 30, Acc = 90, Progress = 80% -> S1 = 0.50*80 + 0.30*90 + 0.20*30 = 40 + 27 + 6 = 73
+      // P2: HP = 90, Acc = 70, Progress = 20% -> S2 = 0.50*20 + 0.30*70 + 0.20*90 = 10 + 21 + 18 = 49
+      // P1 wins despite having 1/3 the HP of P2!
+      expect(evaluateWinner(30, 90, 90, 70, 80, 20)).toBe('player1');
+
+      // P2 has higher weighted score:
+      expect(evaluateWinner(90, 70, 30, 90, 20, 80)).toBe('player2');
+    });
+
+    it('on timeout with equal weighted scores, results in a draw', () => {
+      // P1: HP = 50, Acc = 80, Progress = 50% -> 25 + 24 + 10 = 59
+      // P2: HP = 50, Acc = 80, Progress = 50% -> 25 + 24 + 10 = 59
+      expect(evaluateWinner(50, 80, 50, 80, 50, 50)).toBe('draw');
+    });
+
+    it('supports backward-compatible 4-arg calls', () => {
       expect(evaluateWinner(78, 90, 62, 95)).toBe('player1');
       expect(evaluateWinner(40, 90, 80, 85)).toBe('player2');
-    });
-
-    it('on timeout with equal HP, player with higher accuracy wins', () => {
       expect(evaluateWinner(50, 98, 50, 89)).toBe('player1');
       expect(evaluateWinner(50, 85, 50, 92)).toBe('player2');
-    });
-
-    it('on timeout with equal HP and equal accuracy, results in draw', () => {
       expect(evaluateWinner(50, 90, 50, 90)).toBe('draw');
     });
   });

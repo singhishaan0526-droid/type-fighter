@@ -4,6 +4,7 @@ import {
   calculateAccuracy,
   calculateWordDamage,
   applyMistakePenalty,
+  calculateTimeoutScore,
   evaluateWinner,
   getRandomChallenge,
   SERVER_CHALLENGES
@@ -85,25 +86,48 @@ describe('Server Combat Engine', () => {
     });
   });
 
+  describe('calculateTimeoutScore', () => {
+    it('calculates weighted score S = 0.50P + 0.30A + 0.20H accurately', () => {
+      expect(calculateTimeoutScore(100, 100, 100)).toBe(100);
+      expect(calculateTimeoutScore(60, 90, 50)).toBe(67);
+      expect(calculateTimeoutScore(0, 0, 0)).toBe(0);
+    });
+
+    it('clamps P, A, and H inputs to [0, 100]', () => {
+      expect(calculateTimeoutScore(150, 120, 200)).toBe(100);
+      expect(calculateTimeoutScore(-20, -50, -10)).toBe(0);
+    });
+  });
+
   describe('evaluateWinner', () => {
     it('awards win to player 1 when player 2 is knocked out', () => {
       expect(evaluateWinner(50, 95, 0, 90)).toBe('player1');
+      expect(evaluateWinner(10, 50, 0, 100, 20, 99)).toBe('player1');
     });
 
     it('awards win to player 2 when player 1 is knocked out', () => {
       expect(evaluateWinner(0, 90, 45, 95)).toBe('player2');
+      expect(evaluateWinner(0, 100, 10, 50, 99, 20)).toBe('player2');
     });
 
     it('returns draw if both players are knocked out simultaneously', () => {
       expect(evaluateWinner(0, 90, 0, 95)).toBe('draw');
     });
 
-    it('evaluates winner based on remaining HP when time expires', () => {
-      expect(evaluateWinner(80, 90, 60, 95)).toBe('player1');
-      expect(evaluateWinner(30, 95, 75, 90)).toBe('player2');
+    it('evaluates winner using weighted score S = 0.50P + 0.30A + 0.20H rather than pure HP', () => {
+      // P1: HP 30, Acc 90, Progress 80 -> S1 = 40 + 27 + 6 = 73
+      // P2: HP 90, Acc 70, Progress 20 -> S2 = 10 + 21 + 18 = 49
+      expect(evaluateWinner(30, 90, 90, 70, 80, 20)).toBe('player1');
+      expect(evaluateWinner(90, 70, 30, 90, 20, 80)).toBe('player2');
     });
 
-    it('uses accuracy as tie-breaker when HP is identical on timeout', () => {
+    it('returns draw on timeout when weighted scores are equal', () => {
+      expect(evaluateWinner(50, 80, 50, 80, 50, 50)).toBe('draw');
+    });
+
+    it('supports backward-compatible 4-arg calls', () => {
+      expect(evaluateWinner(80, 90, 60, 95)).toBe('player1');
+      expect(evaluateWinner(30, 95, 75, 90)).toBe('player2');
       expect(evaluateWinner(50, 98, 50, 92)).toBe('player1');
       expect(evaluateWinner(50, 85, 50, 94)).toBe('player2');
       expect(evaluateWinner(50, 95, 50, 95)).toBe('draw');
