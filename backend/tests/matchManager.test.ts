@@ -179,7 +179,7 @@ describe('MatchManager', () => {
     expect(earlier.errorCode).toBe('STALE_SEQUENCE');
   });
 
-  it('penalizes combo and accuracy on typing mistake', () => {
+  it('penalizes combo and accuracy on typing mistake and advances progress without blocking', () => {
     const { session } = manager.joinSession('room-err', 'socket-1', 'byte');
     manager.joinSession('room-err', 'socket-2', 'glitch');
     session.phase = 'battle';
@@ -199,8 +199,22 @@ describe('MatchManager', () => {
     expect(res.valid).toBe(true);
     expect(res.isMatch).toBe(false);
     expect(session.p1?.mistakes).toBe(1);
-    expect(session.p1?.currentTypedIndex).toBe(0); // Did not advance
+    expect(session.p1?.currentTypedIndex).toBe(1); // Progress advances on mistake!
     expect(session.p1?.accuracy).toBeLessThan(100);
+
+    // Continue typing next character 'o' (correct at index 1) immediately without backspacing
+    const res2 = manager.processTypingInput('socket-1', {
+      seq: 2,
+      challengeId: 'ch-dog',
+      index: 1,
+      char: 'o',
+      timestamp: Date.now()
+    });
+    expect(res2.valid).toBe(true);
+    expect(res2.isMatch).toBe(true);
+    expect(session.p1?.currentTypedIndex).toBe(2);
+    expect(session.p1?.mistakes).toBe(1);
+    expect(session.p1?.correctKeystrokes).toBe(1);
   });
 
   it('handles temporary disconnection and successful reconnection with token', () => {
@@ -325,7 +339,7 @@ describe('MatchManager', () => {
     expect(manager.getSessionBySocket('socket-1')).toBeUndefined();
   });
 
-  it('completes match immediately when a player finishes the full sentence', () => {
+  it('auto-advances to next sentence on completion and allows continuous typing', () => {
     const { session } = manager.joinSession('room-sentence-win', 'socket-1', 'byte');
     manager.joinSession('room-sentence-win', 'socket-2', 'glitch');
     session.phase = 'battle';
@@ -353,13 +367,22 @@ describe('MatchManager', () => {
       timestamp: Date.now()
     });
     expect(res2.valid).toBe(true);
-    expect(res2.matchFinished).toBe(true);
-    expect(session.phase).toBe('finished');
-    expect(session.winner).toBe('player1');
-    expect(session.finishReason).toBe('completion');
-    // Challenge is NOT replaced
-    expect(session.challengeId).toBe('ch-go');
-    expect(session.challengeText).toBe('Go');
+    expect(res2.attackEvent).toBeDefined();
+    expect(res2.nextChallenge).toBeDefined();
+    expect(res2.matchFinished).toBe(false);
+    expect(session.p1?.currentTypedIndex).toBe(0);
+    expect(session.p1?.challengeId).toBe(res2.nextChallenge?.id);
+
+    // Continue typing new challenge immediately
+    const res3 = manager.processTypingInput('socket-1', {
+      seq: 3,
+      challengeId: res2.nextChallenge!.id,
+      index: 0,
+      char: res2.nextChallenge!.text[0],
+      timestamp: Date.now()
+    });
+    expect(res3.valid).toBe(true);
+    expect(session.p1?.currentTypedIndex).toBe(1);
   });
 
   it('rejects typing input after match completion', () => {

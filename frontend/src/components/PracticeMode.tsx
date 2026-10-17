@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import type { Character, FloatingText, Particle } from '../types/game';
 import { BATTLE_SENTENCES, getRandomSentence } from '../data/sentences';
 import { sound } from '../utils/sound';
-import { calculateWpm, calculateAccuracy, calculateWordDamage } from '../utils/combatMath';
+import { calculateWordDamage } from '../utils/combatMath';
+import { processTypingInput } from '../utils/typingEngine';
 import { ShadowFighterSprite } from './ShadowFighterSprite';
 import { Swords, RotateCcw, Target, Zap, Flame, Sparkles } from 'lucide-react';
 
@@ -22,6 +23,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
   const [accuracy, setAccuracy] = useState(100);
   const [totalKeystrokes, setTotalKeystrokes] = useState(0);
   const [correctKeystrokes, setCorrectKeystrokes] = useState(0);
+  const [mistakes, setMistakes] = useState(0);
   const [wordsCompleted, setWordsCompleted] = useState(0);
   const [animState, setAnimState] = useState<'idle' | 'attack'>('idle');
 
@@ -32,6 +34,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
   const inputRef = useRef<HTMLInputElement>(null);
   const startTimeRef = useRef<number>(Date.now());
   const lastTypedWordIndexRef = useRef<number>(0);
+  const maxCorrectIndexRef = useRef<number>(0);
 
   useEffect(() => {
     if (inputRef.current) {
@@ -71,7 +74,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
     if (inputRef.current) inputRef.current.focus({ preventScroll: true });
   };
 
-  const triggerFX = (text: string, type: 'damage' | 'critical' | 'combo') => {
+  const triggerFX = (text: string, type: 'damage' | 'critical' | 'combo' | 'miss') => {
     const textId = `${Date.now()}-${Math.random()}`;
     setFloatingTexts((prev) => [
       ...prev,
@@ -122,68 +125,72 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
 
   const handleInputChange = (value: string) => {
     const prevLen = userInput.length;
-    const isBackspace = value.length < prevLen;
     const elapsedSecs = Math.max(1, (Date.now() - startTimeRef.current) / 1000);
 
-    if (!isBackspace) sound.playKeyClick();
+    const result = processTypingInput(
+      value,
+      currentSentence,
+      {
+        userInput,
+        maxCorrectIndex: maxCorrectIndexRef.current,
+        correctKeystrokes,
+        totalKeystrokes,
+        mistakes,
+        combo,
+        accuracy,
+        wpm,
+        hasInputError: hasError
+      },
+      elapsedSecs,
+      lastTypedWordIndexRef.current
+    );
 
-    const isMatching = currentSentence.startsWith(value);
+    setUserInput(result.nextState.userInput);
+    maxCorrectIndexRef.current = result.nextState.maxCorrectIndex;
+    setHasError(result.nextState.hasInputError);
 
-    if (!isMatching) {
+    if (result.isMistake) {
       sound.playError();
-      setHasError(true);
-      setTotalKeystrokes((prev) => prev + 1);
-      setCombo(0);
-      setAccuracy(calculateAccuracy(correctKeystrokes, totalKeystrokes + 1));
+      triggerFX('MISS', 'miss');
       setTimeout(() => setHasError(false), 220);
-      setUserInput(value);
-      return;
+    } else if (value.length > prevLen) {
+      sound.playKeyClick();
     }
 
-    setHasError(false);
-    setUserInput(value);
+    setCorrectKeystrokes(result.nextState.correctKeystrokes);
+    setTotalKeystrokes(result.nextState.totalKeystrokes);
+    setMistakes(result.nextState.mistakes);
+    setCombo(result.nextState.combo);
+    setMaxCombo((prev) => Math.max(prev, result.nextState.combo));
+    setAccuracy(result.nextState.accuracy);
+    setWpm(result.nextState.wpm);
 
-    const added = Math.max(0, value.length - prevLen);
-    const newCorrect = correctKeystrokes + added;
-    const newTotal = totalKeystrokes + added;
-    setCorrectKeystrokes(newCorrect);
-    setTotalKeystrokes(newTotal);
-    setAccuracy(calculateAccuracy(newCorrect, newTotal));
-    setWpm(calculateWpm(newCorrect, elapsedSecs));
+    if (result.isCompletedWord && result.completedWord) {
+      const { damage, isCritical } = calculateWordDamage(
+        result.completedWord.length,
+        result.nextState.combo,
+        character.stats.power
+      );
+      sound.playAttack(character.weaponType);
+      if (result.nextState.combo > 2) sound.playCombo(result.nextState.combo);
 
-    if (value.endsWith(' ') || value === currentSentence) {
-      const words = value.trim().split(/\s+/);
-      const currentWordIdx = words.length - 1;
+      setAnimState('attack');
+      setTimeout(() => setAnimState('idle'), 350);
+      setWordsCompleted((prev) => prev + 1);
+      triggerFX(isCritical ? `CRIT +${damage}` : `+${damage}`, isCritical ? 'critical' : 'damage');
 
-      if (currentWordIdx >= lastTypedWordIndexRef.current) {
-        const completedWord = words[currentWordIdx];
-        if (completedWord) {
-          const { damage, isCritical } = calculateWordDamage(completedWord.length, combo, character.stats.power);
-          sound.playAttack(character.weaponType);
-          if (combo > 2) sound.playCombo(combo);
-
-          setAnimState('attack');
-          setTimeout(() => setAnimState('idle'), 350);
-
-          const nextCombo = combo + 1;
-          setCombo(nextCombo);
-          setMaxCombo((prev) => Math.max(prev, nextCombo));
-          setWordsCompleted((prev) => prev + 1);
-
-          triggerFX(isCritical ? `CRIT +${damage}` : `+${damage}`, isCritical ? 'critical' : 'damage');
-        }
-        lastTypedWordIndexRef.current = currentWordIdx + 1;
-      }
+      const words = result.nextState.userInput.trim().split(/\s+/);
+      lastTypedWordIndexRef.current = words.length;
     }
 
-    if (value === currentSentence) {
+    if (result.isSentenceCompleted) {
       sound.playVictory();
-      setTimeout(() => {
-        const nextSentence = getSentenceForCategory(currentCategory);
-        setCurrentSentence(nextSentence);
-        setUserInput('');
-        lastTypedWordIndexRef.current = 0;
-      }, 300);
+      const nextSentence = getSentenceForCategory(currentCategory);
+      setCurrentSentence(nextSentence);
+      setUserInput('');
+      lastTypedWordIndexRef.current = 0;
+      maxCorrectIndexRef.current = 0;
+      setHasError(false);
     }
   };
 

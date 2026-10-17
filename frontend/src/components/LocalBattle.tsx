@@ -13,6 +13,7 @@ import { BattleResultModal } from './BattleResultModal';
 import { CHARACTER_ULTIMATES } from '../types/abilities';
 import { saveMatchRecord } from '../utils/recordManager';
 import { processTypingInput } from '../utils/typingEngine';
+import { getRandomSentence } from '../data/sentences';
 
 interface LocalBattleProps {
   p1Character: Character;
@@ -656,17 +657,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
       sound.playError();
       triggerImpactFX('p1', 'MISS', 'miss', '#ff2a5f');
       setTimeout(() => setHasInputError(false), 250);
-      setP1State((prev) => ({
-        ...prev,
-        mistakes: result.nextState.mistakes,
-        totalKeystrokes: result.nextState.totalKeystrokes,
-        combo: result.nextState.combo,
-        accuracy: result.nextState.accuracy
-      }));
-      return;
-    }
-
-    if (value.length > prevLength) {
+    } else if (value.length > prevLength) {
       sound.playKeyClick();
     }
 
@@ -674,6 +665,8 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
       ...prev,
       correctKeystrokes: result.nextState.correctKeystrokes,
       totalKeystrokes: result.nextState.totalKeystrokes,
+      mistakes: result.nextState.mistakes,
+      combo: result.nextState.combo,
       accuracy: result.nextState.accuracy,
       wpm: result.nextState.wpm
     }));
@@ -682,10 +675,19 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
       executePlayerStrike(result.completedWord, result.isSentenceCompleted);
       const words = result.nextState.userInput.trim().split(/\s+/);
       lastTypedWordIndexRef.current = words.length;
+    } else if (result.isSentenceCompleted) {
+      executePlayerStrike('strike', true);
     }
 
     if (result.isSentenceCompleted) {
-      finishBattle('player1');
+      const nextSentence = getRandomSentence(currentSentence);
+      setCurrentSentence(nextSentence);
+      currentSentenceRef.current = nextSentence;
+      setUserInput('');
+      userInputRef.current = '';
+      maxCorrectIndexRef.current = 0;
+      lastTypedWordIndexRef.current = 0;
+      setHasInputError(false);
     }
   };
 

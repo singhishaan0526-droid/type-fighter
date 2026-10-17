@@ -32,6 +32,8 @@ export interface PlayerSessionState {
   lastInputTimestamp: number;
   inputCountWindow: number;
   windowStartTime: number;
+  challengeId?: string;
+  challengeText?: string;
 }
 
 export interface MatchSession {
@@ -141,6 +143,12 @@ export interface MatchStartedEvent {
   challengeText: string;
   durationSeconds: number;
   startTime: number;
+}
+
+export interface ChallengeNextEvent {
+  slot: PlayerSlot;
+  challengeId: string;
+  challengeText: string;
 }
 
 export interface TypingProgressEvent {

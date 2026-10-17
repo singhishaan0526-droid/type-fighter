@@ -28,6 +28,7 @@ export function processTypingInput(
   lastTypedWordIndex: number
 ): ProcessInputResult {
   const prevLength = currentState.userInput.length;
+  const sentenceLen = currentSentence.length;
 
   // 1. Backspace / deletion
   if (value.length < prevLength) {
@@ -43,46 +44,53 @@ export function processTypingInput(
     };
   }
 
-  // 2. Character addition
-  const typedChar = value[prevLength];
-  const expectedChar = currentSentence[prevLength];
-
-  if (typedChar !== expectedChar) {
-    const nextMistakes = currentState.mistakes + 1;
-    const nextTotal = currentState.totalKeystrokes + 1;
-    const reducedCombo = applyMistakePenalty(currentState.combo);
-    const nextAccuracy = calculateAccuracy(currentState.correctKeystrokes, nextTotal);
-
+  // 2. Character addition / typing forward
+  const clampedValue = value.slice(0, sentenceLen);
+  if (clampedValue.length === prevLength) {
     return {
-      nextState: {
-        ...currentState,
-        mistakes: nextMistakes,
-        totalKeystrokes: nextTotal,
-        combo: reducedCombo,
-        accuracy: nextAccuracy,
-        hasInputError: true
-      },
-      isMistake: true,
+      nextState: currentState,
+      isMistake: false,
       isCompletedWord: false,
-      isSentenceCompleted: false
+      isSentenceCompleted: prevLength >= sentenceLen
     };
   }
 
-  // 3. Correct character
-  const nextInput = currentSentence.slice(0, prevLength + 1);
-  const isNewChar = prevLength >= currentState.maxCorrectIndex;
-  const nextMaxCorrectIndex = isNewChar ? prevLength + 1 : currentState.maxCorrectIndex;
-  const nextCorrect = currentState.correctKeystrokes + (isNewChar ? 1 : 0);
-  const nextTotal = currentState.totalKeystrokes + 1;
+  let nextCorrect = currentState.correctKeystrokes;
+  let nextTotal = currentState.totalKeystrokes;
+  let nextMistakes = currentState.mistakes;
+  let nextCombo = currentState.combo;
+  let nextMaxCorrect = currentState.maxCorrectIndex;
+  let lastCharWasMistake = false;
+
+  for (let i = prevLength; i < clampedValue.length; i++) {
+    const typedChar = clampedValue[i];
+    const expectedChar = currentSentence[i];
+    nextTotal += 1;
+
+    if (typedChar === expectedChar) {
+      if (i >= nextMaxCorrect) {
+        nextCorrect += 1;
+        nextMaxCorrect = i + 1;
+      }
+      nextCombo += 1;
+      lastCharWasMistake = false;
+    } else {
+      nextMistakes += 1;
+      nextCombo = applyMistakePenalty(nextCombo);
+      lastCharWasMistake = true;
+    }
+  }
+
   const nextAccuracy = calculateAccuracy(nextCorrect, nextTotal);
   const nextWpm = calculateWpm(nextCorrect, elapsedSecs);
 
+  // 3. Word completion evaluation
   let isCompletedWord = false;
   let completedWord: string | undefined;
 
-  const isWordBoundary = nextInput.endsWith(' ') || nextInput === currentSentence;
-  if (isWordBoundary) {
-    const words = nextInput.trim().split(/\s+/);
+  const isWordBoundary = clampedValue.endsWith(' ') || clampedValue.length >= sentenceLen;
+  if (isWordBoundary && clampedValue.length > 0) {
+    const words = currentSentence.slice(0, clampedValue.length).trim().split(/\s+/);
     const currentWordIdx = words.length - 1;
     if (currentWordIdx >= lastTypedWordIndex) {
       completedWord = words[currentWordIdx];
@@ -90,21 +98,21 @@ export function processTypingInput(
     }
   }
 
-  const isSentenceCompleted = nextInput === currentSentence;
+  const isSentenceCompleted = clampedValue.length >= sentenceLen;
 
   return {
     nextState: {
-      userInput: nextInput,
-      maxCorrectIndex: nextMaxCorrectIndex,
+      userInput: clampedValue,
+      maxCorrectIndex: nextMaxCorrect,
       correctKeystrokes: nextCorrect,
       totalKeystrokes: nextTotal,
-      mistakes: currentState.mistakes,
-      combo: currentState.combo,
+      mistakes: nextMistakes,
+      combo: nextCombo,
       accuracy: nextAccuracy,
       wpm: nextWpm,
-      hasInputError: false
+      hasInputError: lastCharWasMistake
     },
-    isMistake: false,
+    isMistake: lastCharWasMistake,
     isCompletedWord,
     completedWord,
     isSentenceCompleted

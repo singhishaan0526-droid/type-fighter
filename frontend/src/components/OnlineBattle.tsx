@@ -425,7 +425,17 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       }
     });
 
-    // 12. Match Errors / Rejections
+    // 12. Auto-advancing Challenge on Sentence Completion
+    socket.on('challenge:next', (evt: any) => {
+      if (evt.slot === yourSlotRef.current) {
+        setCurrentSentence(evt.challengeText);
+        setChallengeId(evt.challengeId);
+        setUserInput('');
+        setHasInputError(false);
+      }
+    });
+
+    // 13. Match Errors / Rejections
     socket.on('match:error', (err: any) => {
       setErrorMessage(`${err.code}: ${err.message}`);
       setTimeout(() => setErrorMessage(null), 4000);
@@ -442,6 +452,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       socket.off('typing:progress');
       socket.off('combat:attack');
       socket.off('player:health');
+      socket.off('challenge:next');
       socket.off('match:finished');
       socket.off('connection:status');
       socket.off('match:error');
@@ -468,36 +479,44 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
   const handleInputChange = (val: string) => {
     if (phase !== 'battle' || battleResult) return;
 
-    sound.playKeyClick();
+    const prevLen = userInput.length;
+    const isBackspace = val.length < prevLen;
+
+    if (isBackspace) {
+      setUserInput(val);
+      setHasInputError(false);
+      return;
+    }
 
     // Determine current index and character being typed
     const nextCharIndex = userInput.length;
-    if (val.length > userInput.length) {
-      const typedChar = val[nextCharIndex];
+    if (nextCharIndex >= currentSentence.length) return;
 
-      // Submit sequence-numbered input event to server
-      const seq = seqRef.current++;
-      socketRef.current.emit('typing:input', {
-        seq,
-        challengeId,
-        index: nextCharIndex,
-        char: typedChar,
-        timestamp: Date.now()
-      });
+    const typedChar = val[nextCharIndex];
 
-      // Visual matching for local input field
-      const isCorrect = currentSentence[nextCharIndex] === typedChar;
-      setHasInputError(!isCorrect);
-      if (!isCorrect) {
-        sound.playError();
-        setTimeout(() => setHasInputError(false), 250);
-      } else {
-        setUserInput(currentSentence.slice(0, nextCharIndex + 1));
-      }
-    } else if (val.length < userInput.length) {
-      setUserInput(val);
-      setHasInputError(false);
+    // Submit sequence-numbered input event to server
+    const seq = seqRef.current++;
+    socketRef.current.emit('typing:input', {
+      seq,
+      challengeId,
+      index: nextCharIndex,
+      char: typedChar,
+      timestamp: Date.now()
+    });
+
+    // Accept character into input field whether correct or incorrect
+    const isCorrect = currentSentence[nextCharIndex] === typedChar;
+    setHasInputError(!isCorrect);
+    if (!isCorrect) {
+      sound.playError();
+      triggerImpactFX(yourSlot === 'player1' ? 'p1' : 'p2', 'MISS', 'miss', '#ff2a5f');
+      setTimeout(() => setHasInputError(false), 250);
+    } else {
+      sound.playKeyClick();
     }
+
+    const nextInput = val.slice(0, currentSentence.length);
+    setUserInput(nextInput);
   };
 
   return (

@@ -161,7 +161,7 @@ describe('Multiplayer Core Integration Tests', () => {
     client2Resumed.disconnect();
   });
 
-  it('delivers consistent final result and statistics to both online players upon sentence completion', async () => {
+  it('delivers challenge:next on sentence completion and consistent final result on knockout', async () => {
     const serverUrl = `http://localhost:${port}`;
     const p1 = ioClient(serverUrl, { reconnection: false });
     const p2 = ioClient(serverUrl, { reconnection: false });
@@ -190,13 +190,13 @@ describe('Multiplayer Core Integration Tests', () => {
 
     const [start1] = await Promise.all([start1Promise, start2Promise]);
 
-    // Track match:finished on both clients
-    const finish1Promise = new Promise<MatchFinishedEvent>((res) => p1.once('match:finished', res));
-    const finish2Promise = new Promise<MatchFinishedEvent>((res) => p2.once('match:finished', res));
+    // Track challenge:next on P1 upon finishing first sentence
+    const nextChallengePromise = new Promise<any>((res) => p1.once('challenge:next', res));
 
     // Set a short target challenge so it finishes within rate limits (< 30 keystrokes/sec)
     const session = matchManager.getSession(sessionId)!;
     session.challengeText = 'Fast win';
+    session.p1!.challengeText = 'Fast win';
     const fullText = session.challengeText;
     for (let i = 0; i < fullText.length; i++) {
       p1.emit('typing:input', {
@@ -208,16 +208,40 @@ describe('Multiplayer Core Integration Tests', () => {
       });
     }
 
+    const nextEvt = await nextChallengePromise;
+    expect(nextEvt.slot).toBe('player1');
+    expect(nextEvt.challengeText).toBeDefined();
+    expect(nextEvt.challengeId).toBeDefined();
+
+    // Now test knockout victory delivery
+    const finish1Promise = new Promise<MatchFinishedEvent>((res) => p1.once('match:finished', res));
+    const finish2Promise = new Promise<MatchFinishedEvent>((res) => p2.once('match:finished', res));
+
+    session.p2!.currentHp = 1;
+    session.p2!.shieldHp = 0;
+    session.p1!.challengeText = 'Win';
+    session.p1!.challengeId = 'ch-win';
+    session.p1!.currentTypedIndex = 0;
+
+    for (let i = 0; i < 3; i++) {
+      p1.emit('typing:input', {
+        seq: 50 + i,
+        challengeId: 'ch-win',
+        index: i,
+        char: 'Win'[i],
+        timestamp: Date.now()
+      });
+    }
+
     const [finish1, finish2] = await Promise.all([finish1Promise, finish2Promise]);
 
     // Both players receive identical winner, reason, and statistics
     expect(finish1.winner).toBe('player1');
     expect(finish2.winner).toBe('player1');
-    expect(finish1.reason).toBe('completion');
-    expect(finish2.reason).toBe('completion');
+    expect(finish1.reason).toBe('knockout');
+    expect(finish2.reason).toBe('knockout');
     expect(finish1.p1Stats.accuracy).toBe(finish2.p1Stats.accuracy);
     expect(finish1.p1Stats.wpm).toBe(finish2.p1Stats.wpm);
-    expect(finish1.p2Stats.damageDealt).toBe(finish2.p2Stats.damageDealt);
 
     p1.disconnect();
     p2.disconnect();

@@ -18,6 +18,7 @@ export const SOCKET_EVENTS = {
     TYPING_PROGRESS: 'typing:progress',
     COMBAT_ATTACK: 'combat:attack',
     PLAYER_HEALTH: 'player:health',
+    CHALLENGE_NEXT: 'challenge:next',
     MATCH_FINISHED: 'match:finished',
     MATCH_ERROR: 'match:error',
     CONNECTION_STATUS: 'connection:status'

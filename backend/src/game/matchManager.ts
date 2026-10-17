@@ -294,6 +294,7 @@ export class MatchManager {
     attackEvent?: CombatAttackEvent;
     healthEvents?: PlayerHealthEvent[];
     matchFinished?: boolean;
+    nextChallenge?: { id: string; text: string };
   } {
     const mapping = this.getSessionBySocket(socketId);
     if (!mapping) {
@@ -306,16 +307,19 @@ export class MatchManager {
       return { valid: false, errorCode: 'INVALID_STATE', errorMessage: 'Match is not in active battle phase.' };
     }
 
-    if (payload.challengeId !== session.challengeId) {
-      return { valid: false, errorCode: 'INVALID_CHALLENGE', errorMessage: 'Challenge ID does not match active challenge.' };
-    }
-
     const player = slot === 'player1' ? session.p1 : session.p2;
     const opponent = slot === 'player1' ? session.p2 : session.p1;
     const opponentSlot = slot === 'player1' ? 'player2' : 'player1';
 
     if (!player || !opponent) {
       return { valid: false, errorCode: 'PLAYER_MISSING', errorMessage: 'Players not populated.' };
+    }
+
+    const activeChallengeId = player.challengeId || session.challengeId;
+    const activeChallengeText = player.challengeText || session.challengeText;
+
+    if (payload.challengeId !== activeChallengeId && payload.challengeId !== session.challengeId) {
+      return { valid: false, errorCode: 'INVALID_CHALLENGE', errorMessage: 'Challenge ID does not match active challenge.' };
     }
 
     // Monotonic Sequence validation
@@ -341,7 +345,7 @@ export class MatchManager {
       return { valid: false, errorCode: 'IMPOSSIBLE_PROGRESS', errorMessage: 'Submitted position does not match expected position.' };
     }
 
-    const expectedChar = session.challengeText[payload.index];
+    const expectedChar = activeChallengeText[payload.index];
     const isCharCorrect = payload.char === expectedChar;
 
     const elapsedSeconds = session.startTime ? Math.max(1, (now - session.startTime) / 1000) : 1;
@@ -349,81 +353,89 @@ export class MatchManager {
     let attackEvent: CombatAttackEvent | undefined;
     const healthEvents: PlayerHealthEvent[] = [];
     let matchFinished = false;
+    let nextChallenge: { id: string; text: string } | undefined;
+
+    // Advance progression with every accepted keystroke (never block on errors!)
+    player.currentTypedIndex += 1;
+    player.totalKeystrokes += 1;
 
     if (isCharCorrect) {
-      player.currentTypedIndex += 1;
       player.correctKeystrokes += 1;
-      player.totalKeystrokes += 1;
       player.combo += 1;
       player.maxCombo = Math.max(player.maxCombo, player.combo);
-      player.accuracy = calculateAccuracy(player.correctKeystrokes, player.totalKeystrokes);
-      player.wpm = calculateWpm(player.correctKeystrokes, elapsedSeconds);
-
-      // Check for word completion
-      const isWordBoundary = payload.char === ' ' || player.currentTypedIndex === session.challengeText.length;
-      if (isWordBoundary) {
-        const words = session.challengeText.slice(0, player.currentTypedIndex).trim().split(/\s+/);
-        const lastWord = words[words.length - 1] || 'strike';
-        const isEndOfSentence = player.currentTypedIndex === session.challengeText.length;
-        const powerStat = CHARACTER_POWERS[player.characterId] || 80;
-
-        const { damage, isCritical } = calculateWordDamage(
-          lastWord.length,
-          player.combo,
-          powerStat,
-          isEndOfSentence
-        );
-
-        player.damageDealt += damage;
-
-        // Apply damage to opponent with shield absorption
-        let damageToHp = damage;
-        let newShield = opponent.shieldHp;
-        if (newShield > 0) {
-          if (newShield >= damage) {
-            newShield -= damage;
-            damageToHp = 0;
-          } else {
-            damageToHp = damage - newShield;
-            newShield = 0;
-          }
-        }
-
-        opponent.shieldHp = newShield;
-        opponent.currentHp = Math.max(0, opponent.currentHp - damageToHp);
-
-        attackEvent = {
-          attackerSlot: slot,
-          targetSlot: opponentSlot,
-          word: lastWord,
-          damage,
-          isCritical,
-          combo: player.combo
-        };
-
-        healthEvents.push({
-          slot: opponentSlot,
-          currentHp: opponent.currentHp,
-          maxHp: opponent.maxHp,
-          shieldHp: opponent.shieldHp,
-          damageTaken: damageToHp
-        });
-
-        // Knockout check or sentence completion
-        if (opponent.currentHp <= 0) {
-          matchFinished = true;
-          this.finishMatch(session.sessionId, slot, 'knockout');
-        } else if (isEndOfSentence) {
-          matchFinished = true;
-          this.finishMatch(session.sessionId, slot, 'completion');
-        }
-      }
     } else {
-      // Mistake!
-      player.totalKeystrokes += 1;
       player.mistakes += 1;
       player.combo = applyMistakePenalty(player.combo);
-      player.accuracy = calculateAccuracy(player.correctKeystrokes, player.totalKeystrokes);
+    }
+
+    player.accuracy = calculateAccuracy(player.correctKeystrokes, player.totalKeystrokes);
+    player.wpm = calculateWpm(player.correctKeystrokes, elapsedSeconds);
+
+    // Check for word completion or full sentence completion
+    const isEndOfSentence = player.currentTypedIndex >= activeChallengeText.length;
+    const isWordBoundary = payload.char === ' ' || isEndOfSentence;
+
+    if (isWordBoundary) {
+      const words = activeChallengeText.slice(0, player.currentTypedIndex).trim().split(/\s+/);
+      const lastWord = words[words.length - 1] || 'strike';
+      const powerStat = CHARACTER_POWERS[player.characterId] || 80;
+
+      const { damage, isCritical } = calculateWordDamage(
+        lastWord.length,
+        player.combo,
+        powerStat,
+        isEndOfSentence
+      );
+
+      player.damageDealt += damage;
+
+      // Apply damage to opponent with shield absorption
+      let damageToHp = damage;
+      let newShield = opponent.shieldHp;
+      if (newShield > 0) {
+        if (newShield >= damage) {
+          newShield -= damage;
+          damageToHp = 0;
+        } else {
+          damageToHp = damage - newShield;
+          newShield = 0;
+        }
+      }
+
+      opponent.shieldHp = newShield;
+      opponent.currentHp = Math.max(0, opponent.currentHp - damageToHp);
+
+      attackEvent = {
+        attackerSlot: slot,
+        targetSlot: opponentSlot,
+        word: lastWord,
+        damage,
+        isCritical,
+        combo: player.combo
+      };
+
+      healthEvents.push({
+        slot: opponentSlot,
+        currentHp: opponent.currentHp,
+        maxHp: opponent.maxHp,
+        shieldHp: opponent.shieldHp,
+        damageTaken: damageToHp
+      });
+
+      // Knockout check
+      if (opponent.currentHp <= 0) {
+        matchFinished = true;
+        this.finishMatch(session.sessionId, slot, 'knockout');
+      }
+    }
+
+    // Auto-advance to next sentence on completion if match not finished
+    if (isEndOfSentence && !matchFinished) {
+      const picked = getRandomChallenge(activeChallengeId);
+      player.challengeId = picked.id;
+      player.challengeText = picked.text;
+      player.currentTypedIndex = 0;
+      nextChallenge = { id: picked.id, text: picked.text };
     }
 
     return {
@@ -433,7 +445,8 @@ export class MatchManager {
       session,
       attackEvent,
       healthEvents,
-      matchFinished
+      matchFinished,
+      nextChallenge
     };
   }
 
@@ -558,9 +571,10 @@ export class MatchManager {
     const session = this.sessions.get(sessionId);
     if (!session || !session.p1 || !session.p2 || session.phase === 'finished') return null;
 
-    const sentenceLen = session.challengeText.length || 1;
-    const p1Progress = (session.p1.currentTypedIndex / sentenceLen) * 100;
-    const p2Progress = (session.p2.currentTypedIndex / sentenceLen) * 100;
+    const p1SentenceLen = session.p1.challengeText?.length || session.challengeText.length || 1;
+    const p2SentenceLen = session.p2.challengeText?.length || session.challengeText.length || 1;
+    const p1Progress = (session.p1.currentTypedIndex / p1SentenceLen) * 100;
+    const p2Progress = (session.p2.currentTypedIndex / p2SentenceLen) * 100;
 
     const winner = evaluateWinner(
       session.p1.currentHp,

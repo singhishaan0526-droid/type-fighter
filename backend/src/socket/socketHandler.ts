@@ -177,6 +177,15 @@ export function setupSocketHandlers(io: Server, matchManager: MatchManager) {
           });
         }
 
+        // If a new challenge was loaded for this player, broadcast challenge:next
+        if (result.nextChallenge) {
+          io.to(session.sessionId).emit('challenge:next', {
+            slot,
+            challengeId: result.nextChallenge.id,
+            challengeText: result.nextChallenge.text
+          });
+        }
+
         // If match finished due to knockout or completion, broadcast finish
         if (result.matchFinished && session.p1 && session.p2 && session.winner) {
           const elapsed = session.startTime ? Math.max(1, Math.round((Date.now() - session.startTime) / 1000)) : 1;
