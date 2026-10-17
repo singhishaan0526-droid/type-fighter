@@ -115,6 +115,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
   const botComboRef = useRef<number>(0);
   const isBattleFinishedRef = useRef<boolean>(false);
   const maxCorrectIndexRef = useRef<number>(0);
+  const isAdvancingSentenceRef = useRef<boolean>(false);
 
   const p1StateRef = useRef<FighterState>(p1State);
   p1StateRef.current = p1State;
@@ -680,6 +681,8 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     }
 
     if (result.isSentenceCompleted) {
+      if (isAdvancingSentenceRef.current) return;
+      isAdvancingSentenceRef.current = true;
       const nextSentence = getRandomSentence(currentSentence);
       setCurrentSentence(nextSentence);
       currentSentenceRef.current = nextSentence;
@@ -688,6 +691,9 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
       maxCorrectIndexRef.current = 0;
       lastTypedWordIndexRef.current = 0;
       setHasInputError(false);
+      setTimeout(() => {
+        isAdvancingSentenceRef.current = false;
+      }, 50);
     }
   };
 
@@ -698,6 +704,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     if (finisherTimerRef.current) clearTimeout(finisherTimerRef.current);
     maxCorrectIndexRef.current = 0;
     lastTypedWordIndexRef.current = 0;
+    isAdvancingSentenceRef.current = false;
     botComboRef.current = 0;
     startTimeRef.current = Date.now();
 

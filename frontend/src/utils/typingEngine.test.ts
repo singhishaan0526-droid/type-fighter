@@ -195,4 +195,76 @@ describe('Typing Progression and Recovery Engine (Never Block Typing)', () => {
     expect(state.totalKeystrokes).toBe(5);
     expect(state.accuracy).toBe(80); // 4 / 5 = 80%
   });
+
+  it('8. Multiple consecutive wrong characters do not freeze progression', () => {
+    let state = createInitialState();
+
+    // Type 5 consecutive wrong characters for target 'The quick'
+    const wrongSeq = ['X', 'XY', 'XYZ', 'XYZ1', 'XYZ12'];
+    let res;
+    for (const val of wrongSeq) {
+      res = processTypingInput(val, 'The quick', state, 1, 0);
+      state = res.nextState;
+    }
+
+    expect(state.userInput).toBe('XYZ12');
+    expect(state.userInput.length).toBe(5);
+    expect(state.mistakes).toBe(5);
+    expect(state.correctKeystrokes).toBe(0);
+    expect(state.totalKeystrokes).toBe(5);
+    expect(state.accuracy).toBe(0);
+    expect(res?.isMistake).toBe(true);
+
+    // Can immediately type next character (even if correct or wrong)
+    const nextRes = processTypingInput('XYZ12u', 'The quick', state, 1, 0);
+    expect(nextRes.nextState.userInput).toBe('XYZ12u');
+    expect(nextRes.nextState.userInput.length).toBe(6);
+    expect(nextRes.nextState.totalKeystrokes).toBe(6);
+  });
+
+  it('9. Completing a sentence triggers exactly one completion transition and subsequent input is bounded', () => {
+    let state = createInitialState();
+    const target = 'Done';
+
+    // Type 'Done'
+    const res = processTypingInput('Done', target, state, 1, 0);
+    expect(res.isSentenceCompleted).toBe(true);
+    expect(res.nextState.userInput).toBe('Done');
+
+    // Attempting extra characters does not grow beyond target length
+    const extra = processTypingInput('Done!', target, res.nextState, 1, 0);
+    expect(extra.nextState.userInput).toBe('Done');
+    expect(extra.isSentenceCompleted).toBe(true);
+  });
+
+  it('10. Repeated React updates and backspace do not corrupt position or mistake accounting', () => {
+    let state = createInitialState();
+    const target = 'Byte';
+
+    // Type 'B' (correct) -> 'By' (correct) -> 'Byx' (wrong 'x')
+    let res = processTypingInput('B', target, state, 1, 0);
+    res = processTypingInput('By', target, res.nextState, 1, 0);
+    res = processTypingInput('Byx', target, res.nextState, 1, 0);
+
+    expect(res.nextState.userInput).toBe('Byx');
+    expect(res.nextState.mistakes).toBe(1);
+    expect(res.nextState.correctKeystrokes).toBe(2);
+    expect(res.nextState.totalKeystrokes).toBe(3);
+
+    // Player backspaces 'x' -> 'By'
+    const bs = processTypingInput('By', target, res.nextState, 1, 0);
+    expect(bs.nextState.userInput).toBe('By');
+    // Mistake from typing 'x' remains accounted for in total and mistakes
+    expect(bs.nextState.mistakes).toBe(1);
+    expect(bs.nextState.correctKeystrokes).toBe(2);
+    expect(bs.nextState.totalKeystrokes).toBe(3);
+
+    // Player types correct 't' -> 'Byt'
+    const cont = processTypingInput('Byt', target, bs.nextState, 1, 0);
+    expect(cont.nextState.userInput).toBe('Byt');
+    expect(cont.nextState.mistakes).toBe(1);
+    expect(cont.nextState.correctKeystrokes).toBe(3);
+    expect(cont.nextState.totalKeystrokes).toBe(4);
+    expect(cont.nextState.accuracy).toBe(75); // 3 / 4 = 75%
+  });
 });

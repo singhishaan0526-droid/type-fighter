@@ -217,6 +217,35 @@ describe('MatchManager', () => {
     expect(session.p1?.correctKeystrokes).toBe(1);
   });
 
+  it('accepts multiple consecutive wrong characters without freezing progression and completes sentence with errors', () => {
+    const { session } = manager.joinSession('room-multi-err', 'socket-1', 'byte');
+    manager.joinSession('room-multi-err', 'socket-2', 'glitch');
+    session.phase = 'battle';
+    session.startTime = Date.now();
+    session.challengeText = 'Fast';
+    session.challengeId = 'ch-fast';
+
+    // Type 4 wrong characters: 'X', 'Y', 'Z', 'W'
+    for (let i = 0; i < 4; i++) {
+      const res = manager.processTypingInput('socket-1', {
+        seq: i + 1,
+        challengeId: 'ch-fast',
+        index: i,
+        char: ['X', 'Y', 'Z', 'W'][i],
+        timestamp: Date.now()
+      });
+      expect(res.valid).toBe(true);
+      expect(res.isMatch).toBe(false);
+      if (i === 3) {
+        // 4th character finishes sentence despite all 4 being wrong!
+        expect(res.nextChallenge).toBeDefined();
+        expect(session.p1?.currentTypedIndex).toBe(0);
+        expect(session.p1?.mistakes).toBe(4);
+        expect(session.p1?.correctKeystrokes).toBe(0);
+      }
+    }
+  });
+
   it('handles temporary disconnection and successful reconnection with token', () => {
     const { session, reconnectToken } = manager.joinSession('room-reconnect', 'socket-1', 'byte');
     manager.joinSession('room-reconnect', 'socket-2', 'glitch');
