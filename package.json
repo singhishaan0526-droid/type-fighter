@@ -9,7 +9,7 @@
     "frontend"
   ],
   "scripts": {
-    "dev": "npm --prefix frontend run dev",
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"magenta,cyan\" \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:backend": "npm --prefix backend run dev",
     "build": "npm --prefix frontend run build",
@@ -22,5 +22,8 @@
     "test": "npm run test:frontend && npm run test:backend",
     "lint": "npm --prefix frontend run lint",
     "preview": "npm --prefix frontend run preview"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
   }
 }

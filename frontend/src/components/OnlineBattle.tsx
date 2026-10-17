@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { Character, FighterState, BattleResult, FloatingText, Particle, PlayerSlot } from '../types/game';
 import { CHARACTERS, getCharacterById } from '../data/characters';
 import { sound } from '../utils/sound';
-import { connectSocket, getSocket } from '../utils/socketClient';
+import { connectSocket, getSocket, disconnectSocket, getServerUrl } from '../utils/socketClient';
 import { BattleHUD } from './BattleHUD';
 import { ShadowArena } from './ShadowArena';
 import { TypingConsole } from './TypingConsole';
@@ -441,12 +441,29 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       setTimeout(() => setErrorMessage(null), 4000);
     });
 
+    // 14. Player Left / Disconnected from Lobby
+    socket.on('player:left', (evt: any) => {
+      if (evt.slot === 'player1') {
+        setP1Ready(false);
+      } else {
+        setP2Ready(false);
+      }
+      setPhase('waiting');
+    });
+
+    // 15. Connection Error Notification
+    socket.on('connect_error', () => {
+      setErrorMessage(`Connecting to duel server (${getServerUrl()})...`);
+    });
+
     return () => {
       socket.off('connect');
+      socket.off('connect_error');
       socket.off('match:state');
       socket.off('player:joined');
       socket.off('player:character');
       socket.off('player:ready');
+      socket.off('player:left');
       socket.off('match:countdown');
       socket.off('match:started');
       socket.off('typing:progress');
@@ -458,6 +475,20 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       socket.off('match:error');
     };
   }, [sessionId, initialCharacter.id, triggerImpactFX, triggerScreenShake]);
+
+  // Clean exit helper
+  const handleExit = useCallback(() => {
+    try {
+      if (socketRef.current) {
+        socketRef.current.emit('match:leave');
+      }
+      sessionStorage.removeItem(`typing_reconnect_${sessionId}`);
+      disconnectSocket();
+    } catch {
+      // safe guard
+    }
+    onExit();
+  }, [sessionId, onExit]);
 
   // Handle Ready Toggle
   const handleToggleReady = () => {
@@ -531,6 +562,9 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
             <button className="copy-session-btn" onClick={handleCopySessionId} title="Copy Session ID">
               {copied ? <Check size={13} color="#00f59b" /> : <Copy size={13} />}
             </button>
+            <span style={{ marginLeft: '0.4rem', opacity: 0.65, fontSize: '0.7rem' }}>
+              [{getServerUrl().includes('localhost') ? 'LOCAL' : 'CLOUD'}]
+            </span>
           </div>
 
           <div className="online-slot-tag">
@@ -552,7 +586,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
           </div>
         )}
 
-        <button className="navbar-btn outline-btn" onClick={onExit} title="Leave Online Battle">
+        <button className="navbar-btn outline-btn" onClick={handleExit} title="Leave Online Battle">
           <RotateCcw size={15} />
           <span>LEAVE DUEL</span>
         </button>
@@ -574,6 +608,23 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
         isScreenShaking={isScreenShaking}
         countdown={countdown}
       />
+
+      {/* Connecting Chamber Overlay */}
+      {phase === 'connecting' && (
+        <div className="online-lobby-card" style={{ textAlign: 'center', padding: '2.5rem 1.5rem' }}>
+          <div className="online-lobby-header" style={{ justifyContent: 'center', marginBottom: '1rem' }}>
+            <Wifi size={26} className="text-neon-cyan animate-pulse" />
+            <div>
+              <h3>CONNECTING TO DUEL ARENA</h3>
+              <p>Establishing link with combat server ({getServerUrl()})...</p>
+            </div>
+          </div>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.6rem', background: 'rgba(0, 240, 255, 0.08)', padding: '0.6rem 1.2rem', borderRadius: '8px', border: '1px solid rgba(0, 240, 255, 0.2)' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>SESSION ROOM:</span>
+            <code style={{ color: 'var(--neon-cyan)', fontWeight: 700, letterSpacing: '0.05em' }}>{sessionId}</code>
+          </div>
+        </div>
+      )}
 
       {/* Pre-Match Ready Lobby Overlay if waiting for players */}
       {(phase === 'waiting' || phase === 'ready') && (
@@ -652,7 +703,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
           p1State={p1State}
           p2State={p2State}
           onRematch={handleToggleReady}
-          onCharacterSelect={onExit}
+          onCharacterSelect={handleExit}
         />
       )}
     </div>

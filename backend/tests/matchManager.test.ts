@@ -564,4 +564,54 @@ describe('MatchManager', () => {
     const res2 = manager.setReady('socket-2', true);
     expect(res2.bothReady).toBe(true);
   });
+
+  it('handles repeated joins from the same socket idempotently without taking player2 slot', () => {
+    const res1 = manager.joinSession('room-idempotent', 'socket-single', 'byte');
+    expect(res1.slot).toBe('player1');
+    expect(res1.session.phase).toBe('waiting');
+    expect(res1.session.p2).toBeNull();
+
+    // Repeated join from the same socket (e.g. React StrictMode or re-render)
+    const res2 = manager.joinSession('room-idempotent', 'socket-single', 'zenko');
+    expect(res2.slot).toBe('player1');
+    expect(res2.session.p1?.characterId).toBe('zenko');
+    expect(res2.session.p2).toBeNull();
+    expect(res2.session.phase).toBe('waiting');
+
+    // Real second player can now join player2 normally
+    const res3 = manager.joinSession('room-idempotent', 'socket-partner', 'glitch');
+    expect(res3.slot).toBe('player2');
+    expect(res3.session.phase).toBe('ready');
+    expect(res3.session.p1?.characterId).toBe('zenko');
+    expect(res3.session.p2?.characterId).toBe('glitch');
+  });
+
+  it('properly transitions to ready when a player leaves and a new player joins the vacant slot', () => {
+    manager.joinSession('room-vacant', 'socket-a', 'byte');
+    manager.joinSession('room-vacant', 'socket-b', 'glitch');
+
+    // Player A leaves
+    manager.leaveSession('socket-a');
+    const session = manager.getSession('room-vacant');
+    expect(session?.p1).toBeNull();
+    expect(session?.p2?.socketId).toBe('socket-b');
+    expect(session?.phase).toBe('waiting');
+
+    // New Player C joins into vacant player1 slot
+    const resC = manager.joinSession('room-vacant', 'socket-c', 'zenko');
+    expect(resC.slot).toBe('player1');
+    expect(resC.session.p1?.characterId).toBe('zenko');
+    expect(resC.session.p2?.characterId).toBe('glitch');
+    expect(resC.session.phase).toBe('ready');
+  });
+
+  it('cleans up session when all players leave the lobby', () => {
+    manager.joinSession('room-cleanup', 'socket-1', 'byte');
+    manager.joinSession('room-cleanup', 'socket-2', 'glitch');
+
+    manager.leaveSession('socket-1');
+    manager.leaveSession('socket-2');
+
+    expect(manager.getSession('room-cleanup')).toBeUndefined();
+  });
 });

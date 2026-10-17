@@ -86,6 +86,20 @@ export class MatchManager {
       }
     }
 
+    // Check if THIS socket is already registered in this session (idempotent join / StrictMode protection)
+    if (session.p1 && session.p1.socketId === socketId) {
+      session.p1.characterId = characterId;
+      session.p1.isConnected = true;
+      this.socketToSession.set(socketId, { sessionId, slot: 'player1' });
+      return { session, slot: 'player1', reconnectToken: session.p1.reconnectToken };
+    }
+    if (session.p2 && session.p2.socketId === socketId) {
+      session.p2.characterId = characterId;
+      session.p2.isConnected = true;
+      this.socketToSession.set(socketId, { sessionId, slot: 'player2' });
+      return { session, slot: 'player2', reconnectToken: session.p2.reconnectToken };
+    }
+
     // New join check
     if (session.phase !== 'waiting' && session.phase !== 'ready') {
       throw new Error('MATCH_ALREADY_IN_PROGRESS');
@@ -100,9 +114,12 @@ export class MatchManager {
     } else if (!session.p2) {
       slot = 'player2';
       session.p2 = this.createPlayerState(slot, socketId, token, characterId);
-      session.phase = 'ready'; // Both players in lobby
     } else {
       throw new Error('SESSION_FULL');
+    }
+
+    if (session.p1 && session.p2) {
+      session.phase = 'ready'; // Both players are in the lobby
     }
 
     this.socketToSession.set(socketId, { sessionId, slot });
@@ -473,6 +490,9 @@ export class MatchManager {
         session.p2 = null;
       }
       session.phase = 'waiting';
+      if (!session.p1 && !session.p2) {
+        this.cleanupSession(session.sessionId);
+      }
       return { session, slot };
     }
 
@@ -660,6 +680,10 @@ export class MatchManager {
 
     if (session.phase === 'waiting' || session.phase === 'ready') {
       session.phase = 'waiting';
+    }
+
+    if (!session.p1 && !session.p2) {
+      this.cleanupSession(session.sessionId);
     }
 
     return { session, slot };

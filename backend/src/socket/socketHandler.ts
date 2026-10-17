@@ -258,6 +258,8 @@ export function setupSocketHandlers(io: Server, matchManager: MatchManager) {
                 elapsedSeconds: elapsed
               });
             }
+          } else {
+            socket.to(session.sessionId).emit('player:left', { slot });
           }
         }
       } catch {
@@ -295,6 +297,8 @@ export function setupSocketHandlers(io: Server, matchManager: MatchManager) {
               status: 'disconnected',
               graceSecondsRemaining: 15
             });
+          } else {
+            io.to(session.sessionId).emit('player:left', { slot });
           }
         }
       } catch {
