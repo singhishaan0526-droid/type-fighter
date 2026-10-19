@@ -68,8 +68,8 @@ export function processTypingInput(
     nextTotal += 1;
 
     if (typedChar === expectedChar) {
+      nextCorrect += 1;
       if (i >= nextMaxCorrect) {
-        nextCorrect += 1;
         nextMaxCorrect = i + 1;
       }
       nextCombo += 1;

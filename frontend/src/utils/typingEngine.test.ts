@@ -159,7 +159,7 @@ describe('Typing Progression and Recovery Engine (Never Block Typing)', () => {
     expect(state.mistakes).toBe(1);
   });
 
-  it('7. Handles optional backspacing without duplicating correct keystroke counts', () => {
+  it('7. Handles optional backspacing without falsely penalizing accuracy on correct retyping', () => {
     let state = createInitialState();
 
     // Type 'The '
@@ -174,6 +174,8 @@ describe('Typing Progression and Recovery Engine (Never Block Typing)', () => {
     expect(state.correctKeystrokes).toBe(4);
     expect(state.totalKeystrokes).toBe(4);
     expect(state.maxCorrectIndex).toBe(4);
+    expect(state.mistakes).toBe(0);
+    expect(state.accuracy).toBe(100);
 
     // User backspaces twice to 'Th'
     const bs1 = processTypingInput('The', initialSentence, state, 1, 1);
@@ -184,16 +186,18 @@ describe('Typing Progression and Recovery Engine (Never Block Typing)', () => {
     expect(state.userInput).toBe('Th');
     expect(state.correctKeystrokes).toBe(4);
     expect(state.maxCorrectIndex).toBe(4);
+    expect(state.accuracy).toBe(100);
 
     // User re-types 'e'
     const retypeE = processTypingInput('The', initialSentence, state, 1, 1);
     state = retypeE.nextState;
 
-    // correctKeystrokes must NOT increase because index 2 was already counted!
+    // Retyping correct characters counts as correct keystrokes, retaining 100% accuracy with 0 mistakes
     expect(state.userInput).toBe('The');
-    expect(state.correctKeystrokes).toBe(4);
+    expect(state.correctKeystrokes).toBe(5);
     expect(state.totalKeystrokes).toBe(5);
-    expect(state.accuracy).toBe(80); // 4 / 5 = 80%
+    expect(state.mistakes).toBe(0);
+    expect(state.accuracy).toBe(100);
   });
 
   it('8. Multiple consecutive wrong characters do not freeze progression', () => {
@@ -266,5 +270,34 @@ describe('Typing Progression and Recovery Engine (Never Block Typing)', () => {
     expect(cont.nextState.correctKeystrokes).toBe(3);
     expect(cont.nextState.totalKeystrokes).toBe(4);
     expect(cont.nextState.accuracy).toBe(75); // 3 / 4 = 75%
+  });
+
+  it('11. Accuracy remains exactly 100% when backspacing and retyping without any mistakes', () => {
+    let state = createInitialState();
+    const target = 'Shadow strike';
+
+    // Type 'Shadow ' (7 characters correctly)
+    for (let i = 0; i < 7; i++) {
+      state = processTypingInput(target.slice(0, i + 1), target, state, 1, 0).nextState;
+    }
+    expect(state.accuracy).toBe(100);
+    expect(state.correctKeystrokes).toBe(7);
+    expect(state.totalKeystrokes).toBe(7);
+    expect(state.mistakes).toBe(0);
+
+    // Backspace 4 characters back to 'Sha'
+    state = processTypingInput('Sha', target, state, 1, 0).nextState;
+    expect(state.accuracy).toBe(100);
+    expect(state.mistakes).toBe(0);
+
+    // Retype 'dow ' (4 characters correctly)
+    for (let i = 3; i < 7; i++) {
+      state = processTypingInput(target.slice(0, i + 1), target, state, 1, 0).nextState;
+    }
+    // Total keystrokes = 11, correct = 11, mistakes = 0 -> 100% accuracy
+    expect(state.totalKeystrokes).toBe(11);
+    expect(state.correctKeystrokes).toBe(11);
+    expect(state.mistakes).toBe(0);
+    expect(state.accuracy).toBe(100);
   });
 });
