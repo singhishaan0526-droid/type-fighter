@@ -61,6 +61,27 @@ export const BattleResultModal: React.FC<BattleResultModalProps> = ({
               ? 'Both warriors fought to a standstill!'
               : `${p2State.character.name} proved too swift in combat.`}
           </p>
+
+          {!isDraw && (
+            <div
+              className="result-dialogue-quote-box"
+              style={{
+                borderColor: (isP1Winner ? p1State.character : p2State.character).themeColor,
+                boxShadow: `0 0 15px ${(isP1Winner ? p1State.character : p2State.character).accentGlow}`
+              }}
+            >
+              <div className="quote-box-header">
+                <span
+                  className="quote-finisher-tag"
+                  style={{ backgroundColor: (isP1Winner ? p1State.character : p2State.character).themeColor }}
+                >
+                  ⚡ {(isP1Winner ? p1State.character : p2State.character).finisherName}
+                </span>
+                <span className="quote-char-tag">{(isP1Winner ? p1State.character : p2State.character).name}</span>
+              </div>
+              <p className="quote-bubble-line">"{(isP1Winner ? p1State.character : p2State.character).finisherQuote}"</p>
+            </div>
+          )}
         </div>
 
         {/* Head-to-Head Comparison */}

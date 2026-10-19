@@ -1,13 +1,21 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { Character, FighterState, BattleResult, FloatingText, Particle, PlayerSlot } from '../types/game';
+import type { Character, FighterState, BattleResult, FloatingText, Particle, PlayerSlot, CombatAnimationState } from '../types/game';
 import { CHARACTERS, getCharacterById } from '../data/characters';
 import { sound } from '../utils/sound';
-import { connectSocket, getSocket, disconnectSocket, getServerUrl } from '../utils/socketClient';
+import {
+  connectSocket,
+  getSocket,
+  disconnectSocket,
+  getServerUrl,
+  setServerUrl,
+  REMOTE_PRODUCTION_BACKEND,
+  LOCAL_DEV_BACKEND
+} from '../utils/socketClient';
 import { BattleHUD } from './BattleHUD';
-import { ShadowArena } from './ShadowArena';
+import { ShadowArena, type FinishingMoveState } from './ShadowArena';
 import { TypingConsole } from './TypingConsole';
 import { BattleResultModal } from './BattleResultModal';
-import { Wifi, Users, CheckCircle2, RotateCcw, AlertTriangle, Copy, Check } from 'lucide-react';
+import { Wifi, Users, CheckCircle2, RotateCcw, AlertTriangle, Copy, Check, Globe } from 'lucide-react';
 
 interface OnlineBattleProps {
   initialCharacter: Character;
@@ -24,6 +32,8 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
   const [phase, setPhase] = useState<'connecting' | 'waiting' | 'ready' | 'countdown' | 'battle' | 'finished'>('connecting');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [currentServerUrl, setCurrentServerUrl] = useState<string>(getServerUrl());
+  const [finishingMove, setFinishingMove] = useState<FinishingMoveState | null>(null);
 
   // Fighter states
   const [p1State, setP1State] = useState<FighterState>({
@@ -154,21 +164,49 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
 
   // Copy session ID
   const handleCopySessionId = () => {
-    navigator.clipboard.writeText(sessionId);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      navigator.clipboard.writeText(sessionId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
+
+  // Toggle server between local/LAN and cloud Render
+  const isCloudServer = currentServerUrl === REMOTE_PRODUCTION_BACKEND;
+  const toggleServerUrl = () => {
+    const newTarget = isCloudServer
+      ? (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+          ? `http://${window.location.hostname}:3001`
+          : LOCAL_DEV_BACKEND)
+      : REMOTE_PRODUCTION_BACKEND;
+    setServerUrl(newTarget);
+    setCurrentServerUrl(newTarget);
+  };
+
+  // Listen for server URL changes (e.g. from failover or toggle)
+  useEffect(() => {
+    const handleUrlChange = (e: Event) => {
+      const customEvent = e as CustomEvent<string>;
+      if (customEvent.detail) {
+        setCurrentServerUrl(customEvent.detail);
+      }
+    };
+    window.addEventListener('server-url-changed', handleUrlChange);
+    return () => window.removeEventListener('server-url-changed', handleUrlChange);
+  }, []);
 
   // Connect to Socket.IO and register events
   useEffect(() => {
     const socket = connectSocket();
     socketRef.current = socket;
 
-    // Check for existing reconnection token
-    const savedToken = sessionStorage.getItem(`typing_reconnect_${sessionId}`);
-
-    const handleConnect = () => {
+    const performJoinOrResume = () => {
       setErrorMessage(null);
+      const savedToken = sessionStorage.getItem(`typing_reconnect_${sessionId}`);
       if (savedToken) {
         socket.emit('match:resume', { sessionId, reconnectToken: savedToken });
       } else {
@@ -180,9 +218,9 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
     };
 
     if (socket.connected) {
-      handleConnect();
+      performJoinOrResume();
     } else {
-      socket.on('connect', handleConnect);
+      socket.on('connect', performJoinOrResume);
     }
 
     // 1. Authoritative Match State Snapshot
@@ -314,31 +352,54 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       const attackerState = isAttackerP1 ? p1StateRef.current : p2StateRef.current;
       const targetTag = isAttackerP1 ? 'p2' : 'p1';
 
-      sound.playAttack(attackerState.character.weaponType);
+      const moveStep = (evt.combo || 1) % 4;
+      let anim: CombatAnimationState = 'punch';
+      let moveLabel = 'PUNCH';
+
+      sound.playDash();
+      if (evt.isCritical || moveStep === 3) {
+        anim = 'unique';
+        moveLabel = attackerState.character.uniqueMoveName;
+        sound.playUltimate();
+        sound.playAttack(attackerState.character.weaponType);
+      } else if (moveStep === 1) {
+        anim = 'kick';
+        moveLabel = 'HIGH KICK';
+        sound.playKick();
+      } else if (moveStep === 2) {
+        anim = 'attack';
+        moveLabel = attackerState.character.weapon.toUpperCase();
+        sound.playAttack(attackerState.character.weaponType);
+      } else {
+        anim = 'punch';
+        moveLabel = 'FIST STRIKE';
+        sound.playPunch();
+      }
+
       if (evt.combo > 2) sound.playCombo(evt.combo);
 
       // Animate attacker and victim
       if (isAttackerP1) {
-        setP1State((prev) => ({ ...prev, animation: 'attack' }));
+        setP1State((prev) => ({ ...prev, animation: anim }));
         setP2State((prev) => ({ ...prev, animation: 'hit' }));
       } else {
-        setP2State((prev) => ({ ...prev, animation: 'attack' }));
+        setP2State((prev) => ({ ...prev, animation: anim }));
         setP1State((prev) => ({ ...prev, animation: 'hit' }));
       }
 
       triggerImpactFX(
         targetTag,
-        evt.isCritical ? `CRIT -${evt.damage}` : `-${evt.damage}`,
+        evt.isCritical ? `CRIT ${moveLabel} -${evt.damage}` : `${moveLabel} -${evt.damage}`,
         evt.isCritical ? 'critical' : 'damage',
         attackerState.character.themeColor
       );
 
-      if (evt.isCritical) triggerScreenShake();
+      if (evt.isCritical || anim === 'unique') triggerScreenShake();
 
       setTimeout(() => {
         setP1State((prev) => ({ ...prev, animation: 'idle' }));
         setP2State((prev) => ({ ...prev, animation: 'idle' }));
-      }, 350);
+      }, 420);
     });
 
     // 9. Authoritative Player Health Update
@@ -363,8 +424,10 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
     // 10. Match Finished
     socket.on('match:finished', (evt: any) => {
       setPhase('finished');
+      sessionStorage.removeItem(`typing_reconnect_${sessionId}`);
 
       const finalizeResult = () => {
+        setFinishingMove(null);
         setBattleResult({
           winner: evt.winner,
           p1Stats: evt.p1Stats,
@@ -382,7 +445,10 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       if (evt.winner !== 'draw' && !hasPlayedFinisherRef.current) {
         hasPlayedFinisherRef.current = true;
         const winningChar = evt.winner === 'player1' ? p1StateRef.current.character : p2StateRef.current.character;
+        const losingChar = evt.winner === 'player1' ? p2StateRef.current.character : p1StateRef.current.character;
+
         sound.playFinisher(winningChar.id);
+        sound.playFinisherImpact();
         triggerScreenShake();
 
         if (evt.winner === 'player1') {
@@ -393,10 +459,22 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
           setP1State((prev) => ({ ...prev, animation: 'defeat' }));
         }
 
+        setFinishingMove({
+          winner: evt.winner,
+          winnerChar: winningChar,
+          loserChar: losingChar,
+          step: 'strike',
+          finisherName: winningChar.finisherName,
+          quote: winningChar.finisherQuote
+        });
+
         finisherTimerRef.current = setTimeout(() => {
-          setP1State((prev) => ({ ...prev, animation: evt.winner === 'player1' ? 'victory' : 'defeat' }));
-          setP2State((prev) => ({ ...prev, animation: evt.winner === 'player2' ? 'victory' : 'defeat' }));
-          finalizeResult();
+          sound.playVictory();
+          setFinishingMove((prev) => (prev ? { ...prev, step: 'dialogue' } : null));
+
+          finisherTimerRef.current = setTimeout(() => {
+            finalizeResult();
+          }, 2800);
         }, 1500);
       } else {
         setP1State((prev) => ({
@@ -435,8 +513,24 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       }
     });
 
-    // 13. Match Errors / Rejections
+    // 13. Match Errors / Auto-Recovery
     socket.on('match:error', (err: any) => {
+      // If resume token failed or session not found, automatically clear stale token and join clean
+      if (
+        err.code === 'RESUME_FAILED' ||
+        err.code === 'INVALID_RECONNECT_TOKEN' ||
+        err.code === 'BAD_RESUME_PAYLOAD' ||
+        err.message?.includes('RECONNECT') ||
+        err.message?.includes('SESSION_NOT_FOUND')
+      ) {
+        sessionStorage.removeItem(`typing_reconnect_${sessionId}`);
+        socket.emit('match:join', {
+          sessionId,
+          characterId: initialCharacter.id
+        });
+        return;
+      }
+
       setErrorMessage(`${err.code}: ${err.message}`);
       setTimeout(() => setErrorMessage(null), 4000);
     });
@@ -474,7 +568,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       socket.off('connection:status');
       socket.off('match:error');
     };
-  }, [sessionId, initialCharacter.id, triggerImpactFX, triggerScreenShake]);
+  }, [sessionId, initialCharacter.id, currentServerUrl, triggerImpactFX, triggerScreenShake]);
 
   // Clean exit helper
   const handleExit = useCallback(() => {
@@ -519,13 +613,11 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       return;
     }
 
-    // Determine current index and character being typed
     const nextCharIndex = userInput.length;
     if (nextCharIndex >= currentSentence.length) return;
 
     const typedChar = val[nextCharIndex];
 
-    // Submit sequence-numbered input event to server
     const seq = seqRef.current++;
     socketRef.current.emit('typing:input', {
       seq,
@@ -535,7 +627,6 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       timestamp: Date.now()
     });
 
-    // Accept character into input field whether correct or incorrect
     const isCorrect = currentSentence[nextCharIndex] === typedChar;
     setHasInputError(!isCorrect);
     if (!isCorrect) {
@@ -551,32 +642,40 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
   };
 
   return (
-    <div className="battle-screen-layout">
+    <div className="battle-screen-layout online-screen-layout">
       {/* Online Session Top Navigation & Status Bar */}
       <div className="online-status-bar">
         <div className="online-session-info">
           <div className="online-pill">
-            <Wifi size={14} className="text-neon-cyan" />
-            <span className="online-room-title">SESSION:</span>
+            <Wifi size={13} className="text-neon-cyan" />
+            <span className="online-room-title">ROOM:</span>
             <code className="online-room-id">{sessionId}</code>
             <button className="copy-session-btn" onClick={handleCopySessionId} title="Copy Session ID">
-              {copied ? <Check size={13} color="#00f59b" /> : <Copy size={13} />}
+              {copied ? <Check size={12} color="#00f59b" /> : <Copy size={12} />}
             </button>
-            <span style={{ marginLeft: '0.4rem', opacity: 0.65, fontSize: '0.7rem' }}>
-              [{getServerUrl().includes('localhost') ? 'LOCAL' : 'CLOUD'}]
-            </span>
           </div>
 
           <div className="online-slot-tag">
-            YOU ARE: <strong>{yourSlot === 'player1' ? 'PLAYER 1 (LEFT)' : 'PLAYER 2 (RIGHT)'}</strong>
+            YOU: <strong>{yourSlot === 'player1' ? 'PLAYER 1 (LEFT)' : 'PLAYER 2 (RIGHT)'}</strong>
           </div>
+
+          <button
+            type="button"
+            className="online-server-pill-btn"
+            onClick={toggleServerUrl}
+            title="Click to toggle combat server"
+          >
+            <Globe size={12} className="text-neon-cyan" />
+            <span className="server-dot" />
+            <span className="server-label">{isCloudServer ? 'CLOUD ARENA' : 'LOCAL WI-FI'}</span>
+          </button>
         </div>
 
         {/* Reconnection Grace Period Warning */}
         {!opponentConnected && graceSeconds !== null && (
           <div className="reconnect-grace-alert">
             <AlertTriangle size={15} />
-            <span>OPPONENT DISCONNECTED. RECONNECTION GRACE: {graceSeconds}s</span>
+            <span>OPPONENT DISCONNECTED. GRACE: {graceSeconds}s</span>
           </div>
         )}
 
@@ -586,8 +685,8 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
           </div>
         )}
 
-        <button className="navbar-btn outline-btn" onClick={handleExit} title="Leave Online Battle">
-          <RotateCcw size={15} />
+        <button className="navbar-btn outline-btn leave-duel-btn" onClick={handleExit} title="Leave Online Battle">
+          <RotateCcw size={14} />
           <span>LEAVE DUEL</span>
         </button>
       </div>
@@ -607,21 +706,52 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
         particles={particles}
         isScreenShaking={isScreenShaking}
         countdown={countdown}
+        finishingMove={finishingMove}
+        onSkipFinisher={() => {
+          if (finishingMove) {
+            setBattleResult({
+              winner: finishingMove.winner,
+              p1Stats: {
+                wpm: p1StateRef.current.wpm,
+                accuracy: p1StateRef.current.accuracy,
+                maxCombo: p1StateRef.current.maxCombo,
+                damageDealt: p1StateRef.current.damageDealt
+              },
+              p2Stats: {
+                wpm: p2StateRef.current.wpm,
+                accuracy: p2StateRef.current.accuracy,
+                maxCombo: p2StateRef.current.maxCombo,
+                damageDealt: p2StateRef.current.damageDealt
+              },
+              elapsedSeconds: 75
+            });
+            setFinishingMove(null);
+          }
+        }}
       />
 
       {/* Connecting Chamber Overlay */}
       {phase === 'connecting' && (
-        <div className="online-lobby-card" style={{ textAlign: 'center', padding: '2.5rem 1.5rem' }}>
-          <div className="online-lobby-header" style={{ justifyContent: 'center', marginBottom: '1rem' }}>
-            <Wifi size={26} className="text-neon-cyan animate-pulse" />
+        <div className="online-lobby-card connecting-card">
+          <div className="online-lobby-header">
+            <Wifi size={28} className="text-neon-cyan animate-pulse" />
             <div>
-              <h3>CONNECTING TO DUEL ARENA</h3>
-              <p>Establishing link with combat server ({getServerUrl()})...</p>
+              <h3>CONNECTING TO COMBAT ARENA</h3>
+              <p>Contacting server: {currentServerUrl}...</p>
             </div>
           </div>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.6rem', background: 'rgba(0, 240, 255, 0.08)', padding: '0.6rem 1.2rem', borderRadius: '8px', border: '1px solid rgba(0, 240, 255, 0.2)' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>SESSION ROOM:</span>
-            <code style={{ color: 'var(--neon-cyan)', fontWeight: 700, letterSpacing: '0.05em' }}>{sessionId}</code>
+          <div className="online-room-badge-row">
+            <span className="room-label">ROOM SESSION:</span>
+            <code className="room-code">{sessionId}</code>
+            <button className="copy-session-btn" onClick={handleCopySessionId}>
+              {copied ? 'COPIED!' : 'COPY CODE'}
+            </button>
+          </div>
+          <div className="connecting-tips">
+            <span>Make sure both players are on the same server &amp; room code.</span>
+            <button type="button" className="switch-server-link" onClick={toggleServerUrl}>
+              Switch to {isCloudServer ? 'Local Wi-Fi Server' : 'Cloud Arena'}
+            </button>
           </div>
         </div>
       )}
@@ -632,18 +762,34 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
           <div className="online-lobby-header">
             <Users size={22} className="text-neon-cyan" />
             <div>
-              <h3>ONLINE COMBAT CHAMBER</h3>
+              <h3>
+                {phase === 'waiting'
+                  ? 'WAITING FOR OPPONENT...'
+                  : 'WARRIORS ASSEMBLED &bull; PREPARE FOR BATTLE'}
+              </h3>
               <p>
                 {phase === 'waiting'
-                  ? 'Waiting for second warrior to join room. Share the session ID above!'
-                  : 'Both warriors connected! Select your character and signal readiness.'}
+                  ? `Share room code "${sessionId}" with Player 2 to join!`
+                  : 'Select your shadow warrior and tap Signal Ready.'}
               </p>
             </div>
           </div>
 
+          {/* Room Invite Share Box */}
+          {phase === 'waiting' && (
+            <div className="lobby-invite-banner">
+              <span className="invite-title">ROOM CODE:</span>
+              <span className="invite-code">{sessionId}</span>
+              <button className="lobby-invite-copy-btn" onClick={handleCopySessionId}>
+                {copied ? <Check size={14} color="#00f59b" /> : <Copy size={14} />}
+                <span>{copied ? 'COPIED!' : 'COPY CODE'}</span>
+              </button>
+            </div>
+          )}
+
           {/* Character selection quick pills */}
           <div className="lobby-char-selector">
-            <span className="lobby-selector-title">YOUR WARRIOR:</span>
+            <span className="lobby-selector-title">SELECT YOUR WARRIOR</span>
             <div className="lobby-char-pills">
               {CHARACTERS.map((char) => {
                 const isSelected = (yourSlot === 'player1' ? p1State.character.id : p2State.character.id) === char.id;
@@ -655,7 +801,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
                     style={{ borderColor: isSelected ? char.themeColor : 'transparent' }}
                   >
                     <img src={char.avatarUrl} alt={char.name} className="mini-char-thumb" />
-                    <span>{char.name}</span>
+                    <span className="char-btn-name">{char.name}</span>
                   </button>
                 );
               })}
@@ -664,7 +810,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
 
           {/* Readiness Controls */}
           <div className="lobby-readiness-row">
-            <div className={`readiness-badge ${p1Ready ? 'ready' : ''}`}>
+            <div className={`readiness-badge ${p1Ready ? 'ready' : 'waiting'}`}>
               <CheckCircle2 size={16} />
               <span>PLAYER 1: {p1Ready ? 'READY' : 'CHOOSING...'}</span>
             </div>
@@ -677,7 +823,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
               {(yourSlot === 'player1' ? p1Ready : p2Ready) ? 'CANCEL READY' : 'SIGNAL READY'}
             </button>
 
-            <div className={`readiness-badge ${p2Ready ? 'ready' : ''}`}>
+            <div className={`readiness-badge ${p2Ready ? 'ready' : 'waiting'}`}>
               <CheckCircle2 size={16} />
               <span>PLAYER 2: {p2Ready ? 'READY' : 'CHOOSING...'}</span>
             </div>
@@ -685,16 +831,18 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
         </div>
       )}
 
-      {/* Bottom Typing Console */}
-      <TypingConsole
-        sentence={currentSentence}
-        userInput={userInput}
-        onInputChange={handleInputChange}
-        p1State={p1State}
-        p2State={p2State}
-        hasError={hasInputError}
-        disabled={phase !== 'battle' || !!battleResult}
-      />
+      {/* Bottom Typing Console - only during countdown, battle, and finished */}
+      {(phase === 'battle' || phase === 'countdown' || phase === 'finished') && (
+        <TypingConsole
+          sentence={currentSentence}
+          userInput={userInput}
+          onInputChange={handleInputChange}
+          p1State={p1State}
+          p2State={p2State}
+          hasError={hasInputError}
+          disabled={phase !== 'battle' || !!battleResult}
+        />
+      )}
 
       {/* Battle Results Modal */}
       {battleResult && (

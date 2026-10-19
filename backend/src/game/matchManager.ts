@@ -100,6 +100,34 @@ export class MatchManager {
       return { session, slot: 'player2', reconnectToken: session.p2.reconnectToken };
     }
 
+    // If session was finished, reset it for a fresh match and clear any disconnected players
+    if (session.phase === 'finished') {
+      this.resetSessionForRematch(session);
+      if (session.p1 && !session.p1.isConnected) {
+        this.socketToSession.delete(session.p1.socketId);
+        session.p1 = null;
+      }
+      if (session.p2 && !session.p2.isConnected) {
+        this.socketToSession.delete(session.p2.socketId);
+        session.p2 = null;
+      }
+      session.phase = session.p1 && session.p2 ? 'ready' : 'waiting';
+    }
+
+    // If session is waiting or ready, clean up disconnected players whose socket is gone
+    if (session.phase === 'waiting' || session.phase === 'ready') {
+      if (session.p1 && !session.p1.isConnected) {
+        this.socketToSession.delete(session.p1.socketId);
+        session.p1 = null;
+        session.phase = 'waiting';
+      }
+      if (session.p2 && !session.p2.isConnected) {
+        this.socketToSession.delete(session.p2.socketId);
+        session.p2 = null;
+        session.phase = 'waiting';
+      }
+    }
+
     // New join check
     if (session.phase !== 'waiting' && session.phase !== 'ready') {
       throw new Error('MATCH_ALREADY_IN_PROGRESS');

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { Character, FighterState, GameMode, BotDifficulty, BattleResult, FloatingText, Particle } from '../types/game';
+import type { Character, FighterState, GameMode, BotDifficulty, BattleResult, FloatingText, Particle, CombatAnimationState } from '../types/game';
 import { sound } from '../utils/sound';
 import {
   calculateWpm,
@@ -7,7 +7,7 @@ import {
   evaluateWinner
 } from '../utils/combatMath';
 import { BattleHUD } from './BattleHUD';
-import { ShadowArena } from './ShadowArena';
+import { ShadowArena, type FinishingMoveState } from './ShadowArena';
 import { TypingConsole } from './TypingConsole';
 import { BattleResultModal } from './BattleResultModal';
 import { CHARACTER_ULTIMATES } from '../types/abilities';
@@ -38,6 +38,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
   // Time & Match flow
   const [timeLeft, setTimeLeft] = useState(180); // 3 minutes (180s) battle timer
   const [battleResult, setBattleResult] = useState<BattleResult | null>(null);
+  const [finishingMove, setFinishingMove] = useState<FinishingMoveState | null>(null);
   const [matchActive, setMatchActive] = useState(true);
   const [countdown, setCountdown] = useState<number | null>(3);
   const [isScreenShaking, setIsScreenShaking] = useState(false);
@@ -198,6 +199,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     const currentP2 = p2StateRef.current;
 
     const finalizeModal = () => {
+      setFinishingMove(null);
       setBattleResult({
         winner,
         p1Stats: {
@@ -216,11 +218,14 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
       });
     };
 
-    // Play character-specific finisher once upon confirmed victory
+    // Play character-specific finisher and dialogue upon confirmed victory
     if (winner !== 'draw' && !hasPlayedFinisherRef.current) {
       hasPlayedFinisherRef.current = true;
       const winningChar = winner === 'player1' ? p1Character : p2Character;
+      const losingChar = winner === 'player1' ? p2Character : p1Character;
+
       sound.playFinisher(winningChar.id);
+      sound.playFinisherImpact();
       triggerScreenShake();
 
       if (winner === 'player1') {
@@ -231,11 +236,25 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
         setP1State((prev) => ({ ...prev, animation: 'defeat' }));
       }
 
+      // Stage 1: Finishing Strike banner & impact
+      setFinishingMove({
+        winner,
+        winnerChar: winningChar,
+        loserChar: losingChar,
+        step: 'strike',
+        finisherName: winningChar.finisherName,
+        quote: winningChar.finisherQuote
+      });
+
+      // Stage 2: Character Dialogue Card presentation
       finisherTimerRef.current = setTimeout(() => {
-        setP1State((prev) => ({ ...prev, animation: winner === 'player1' ? 'victory' : 'defeat' }));
-        setP2State((prev) => ({ ...prev, animation: winner === 'player2' ? 'victory' : 'defeat' }));
         sound.playVictory();
-        finalizeModal();
+        setFinishingMove((prev) => (prev ? { ...prev, step: 'dialogue' } : null));
+
+        // Stage 3: After dialogue, open victory results modal
+        finisherTimerRef.current = setTimeout(() => {
+          finalizeModal();
+        }, 2800);
       }, 1500);
     } else {
       setP1State((prev) => ({
@@ -268,46 +287,20 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     }
   }, [p1Character, p2Character, difficulty, mode, triggerScreenShake]);
 
-  // Check HP thresholds - Sustained 3-Minute Typing Battle
+  // Check HP thresholds - Immediate KO when any warrior HP hits 0
   useEffect(() => {
     if (!matchActive || isBattleFinishedRef.current || battleResult) return;
 
     if (p2State.currentHp <= 0) {
-      p1KnockdownsRef.current += 1;
-      sound.playCombo(p1KnockdownsRef.current);
-      triggerImpactFX('p2', 'KNOCKDOWN! +1 PT', 'critical', '#ffb703');
+      triggerImpactFX('p2', 'K.O.!', 'critical', '#ffb703');
       triggerScreenShake();
-      setRoundBanner(`⚡ KNOCKDOWN! ${p1Character.name.toUpperCase()} SCORES A ROUND POINT! (${p1KnockdownsRef.current} - ${p2KnockdownsRef.current})`);
-      setTimeout(() => setRoundBanner(null), 2500);
-
-      // Opponent recovers HP so the 3-minute typing practice continues
-      setP2State((prev) => ({
-        ...prev,
-        currentHp: prev.maxHp,
-        animation: 'hit'
-      }));
-      setTimeout(() => {
-        setP2State((prev) => ({ ...prev, animation: 'idle' }));
-      }, 400);
+      finishBattle('player1');
     } else if (p1State.currentHp <= 0) {
-      p2KnockdownsRef.current += 1;
-      sound.playError();
-      triggerImpactFX('p1', 'KNOCKDOWN!', 'miss', '#ff2a5f');
+      triggerImpactFX('p1', 'K.O.!', 'miss', '#ff2a5f');
       triggerScreenShake();
-      setRoundBanner(`⚠️ KNOCKDOWN! ${p2Character.name.toUpperCase()} SCORES A ROUND POINT! (${p1KnockdownsRef.current} - ${p2KnockdownsRef.current})`);
-      setTimeout(() => setRoundBanner(null), 2500);
-
-      // Player recovers HP so the 3-minute typing practice continues
-      setP1State((prev) => ({
-        ...prev,
-        currentHp: prev.maxHp,
-        animation: 'hit'
-      }));
-      setTimeout(() => {
-        setP1State((prev) => ({ ...prev, animation: 'idle' }));
-      }, 400);
+      finishBattle('player2');
     }
-  }, [matchActive, p1State.currentHp, p2State.currentHp, battleResult, p1Character.name, p2Character.name, triggerImpactFX, triggerScreenShake]);
+  }, [matchActive, p1State.currentHp, p2State.currentHp, battleResult, finishBattle, triggerImpactFX, triggerScreenShake]);
 
   // Battle Countdown Timer (3 Minutes = 180 Seconds)
   useEffect(() => {
@@ -407,7 +400,30 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
         const finalDamage = Math.max(2, Math.round(damage * 0.3 * config.powerScale));
         botComboRef.current += 1;
 
-        sound.playAttack(p2Character.weaponType);
+        // Dynamic martial arts move rotation for Bot: punch, kick, weapon attack, unique
+        const botMoveStep = Math.floor(Math.random() * 4);
+        let botAnim: CombatAnimationState = 'punch';
+        let botMoveLabel = 'PUNCH';
+
+        sound.playDash();
+        if (botMoveStep === 0) {
+          botAnim = 'punch';
+          botMoveLabel = 'PUNCH';
+          sound.playPunch();
+        } else if (botMoveStep === 1) {
+          botAnim = 'kick';
+          botMoveLabel = 'KICK';
+          sound.playKick();
+        } else if (botMoveStep === 2) {
+          botAnim = 'attack';
+          botMoveLabel = 'SLASH';
+          sound.playAttack(p2Character.weaponType);
+        } else {
+          botAnim = 'unique';
+          botMoveLabel = p2Character.uniqueMoveName;
+          sound.playUltimate();
+          sound.playAttack(p2Character.weaponType);
+        }
 
         // Animate Bot attack & Player 1 hit with shield absorption
         setP2State((prev) => {
@@ -415,7 +431,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
           const nextCorrect = prev.correctKeystrokes + botWordLen + 1;
           return {
             ...prev,
-            animation: 'attack',
+            animation: botAnim,
             combo: nextCombo,
             maxCombo: Math.max(prev.maxCombo, nextCombo),
             wpm: Math.max(10, config.targetWpm + Math.floor(Math.random() * 5 - 2)),
@@ -447,12 +463,12 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
 
         triggerImpactFX(
           'p1',
-          isCritical ? `CRIT -${finalDamage}` : `-${finalDamage}`,
+          isCritical ? `CRIT ${botMoveLabel} -${finalDamage}` : `${botMoveLabel} -${finalDamage}`,
           isCritical ? 'critical' : 'damage',
           p2Character.themeColor
         );
 
-        if (isCritical) {
+        if (isCritical || botAnim === 'unique') {
           triggerScreenShake();
         }
 
@@ -461,7 +477,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
           if (!isMounted) return;
           setP2State((prev) => ({ ...prev, animation: 'idle' }));
           setP1State((prev) => ({ ...prev, animation: 'idle' }));
-        }, 350);
+        }, 420);
 
         botAttackStep();
       }, delay);
@@ -489,8 +505,31 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     const totalDmg = Math.max(3, Math.round((damage + bonusDamage) * 0.5 * hasteMultiplier));
     const meterGain = isEndOfSentence ? 22 : 12;
 
-    // Audio FX
-    sound.playAttack(p1Character.weaponType);
+    // Martial arts rotation: Punch -> Kick -> Weapon Slash -> Signature Unique Move
+    const comboStep = p1State.combo % 4;
+    let playerAnim: CombatAnimationState = 'punch';
+    let moveLabel = 'PUNCH';
+
+    sound.playDash();
+    if (isEndOfSentence || isCritical || comboStep === 3) {
+      playerAnim = 'unique';
+      moveLabel = p1Character.uniqueMoveName;
+      sound.playUltimate();
+      sound.playAttack(p1Character.weaponType);
+    } else if (comboStep === 1) {
+      playerAnim = 'kick';
+      moveLabel = 'HIGH KICK';
+      sound.playKick();
+    } else if (comboStep === 2) {
+      playerAnim = 'attack';
+      moveLabel = `${p1Character.weapon.toUpperCase()}`;
+      sound.playAttack(p1Character.weaponType);
+    } else {
+      playerAnim = 'punch';
+      moveLabel = 'FIST STRIKE';
+      sound.playPunch();
+    }
+
     if (p1State.combo > 2) {
       sound.playCombo(p1State.combo);
     }
@@ -501,7 +540,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
       const nextMeter = Math.min(100, prev.superMeter + meterGain);
       return {
         ...prev,
-        animation: 'attack',
+        animation: playerAnim,
         combo: nextCombo,
         maxCombo: Math.max(prev.maxCombo, nextCombo),
         damageDealt: prev.damageDealt + totalDmg,
@@ -533,10 +572,10 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
 
     // Floating text & spark FX
     const textLabel = isCritical
-      ? `CRIT -${totalDmg}!`
+      ? `CRIT ${moveLabel} -${totalDmg}!`
       : isEndOfSentence
-      ? `FINISHER -${totalDmg}!`
-      : `-${totalDmg}`;
+      ? `FINISHER ${moveLabel} -${totalDmg}!`
+      : `${moveLabel} -${totalDmg}`;
 
     triggerImpactFX(
       'p2',
@@ -545,7 +584,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
       p1Character.themeColor
     );
 
-    if (isCritical || isEndOfSentence) {
+    if (isCritical || isEndOfSentence || playerAnim === 'unique') {
       triggerScreenShake();
     }
 
@@ -553,7 +592,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     setTimeout(() => {
       setP1State((prev) => ({ ...prev, animation: 'idle' }));
       setP2State((prev) => ({ ...prev, animation: 'idle' }));
-    }, 380);
+    }, 420);
   }, [p1Character, p1State.combo, p1State.hasHasteBuff, triggerImpactFX, triggerScreenShake]);
 
   // Trigger Ultimate Ability
@@ -796,6 +835,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     setCountdown(3);
     setFloatingTexts([]);
     setParticles([]);
+    setFinishingMove(null);
     setBattleResult(null);
     setMatchActive(true);
     window.scrollTo({ top: 0, behavior: 'instant' });
@@ -825,6 +865,28 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
         particles={particles}
         isScreenShaking={isScreenShaking}
         countdown={countdown}
+        finishingMove={finishingMove}
+        onSkipFinisher={() => {
+          if (finishingMove) {
+            setBattleResult({
+              winner: finishingMove.winner,
+              p1Stats: {
+                wpm: p1StateRef.current.wpm,
+                accuracy: p1StateRef.current.accuracy,
+                maxCombo: p1StateRef.current.maxCombo,
+                damageDealt: p1StateRef.current.damageDealt
+              },
+              p2Stats: {
+                wpm: p2StateRef.current.wpm,
+                accuracy: p2StateRef.current.accuracy,
+                maxCombo: p2StateRef.current.maxCombo,
+                damageDealt: p2StateRef.current.damageDealt
+              },
+              elapsedSeconds: Math.max(1, Math.round((Date.now() - startTimeRef.current) / 1000))
+            });
+            setFinishingMove(null);
+          }
+        }}
       />
 
       {/* Bottom Typing Card */}

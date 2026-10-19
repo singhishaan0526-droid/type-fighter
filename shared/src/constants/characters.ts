@@ -17,7 +17,12 @@ export const CHARACTERS: Character[] = [
       power: 70,
       agility: 90
     },
-    attackDescription: 'Spins a rapid energy staff releasing pulsing cyan shockwaves.'
+    attackDescription: 'Spins a rapid energy staff releasing pulsing cyan shockwaves.',
+    finisherName: 'CYBER OVERDRIVE: ZERO PURGE',
+    finisherQuote: 'System neutralized. 0.001 seconds was all the opening I needed.',
+    defeatQuote: 'System overload... core temperature critical...',
+    uniqueMoveName: 'Cyber Shock Palm',
+    uniqueMoveDesc: 'Lightning-infused palm thrust and high-speed energy staff vault strike.'
   },
   {
     id: 'glitch',
@@ -35,7 +40,12 @@ export const CHARACTERS: Character[] = [
       power: 88,
       agility: 96
     },
-    attackDescription: 'Executes lightning-fast dual blade cross-slashes leaving fiery red trails.'
+    attackDescription: 'Executes lightning-fast dual blade cross-slashes leaving fiery red trails.',
+    finisherName: 'PHANTOM DELIRIUM: DUAL CROSS',
+    finisherQuote: "Too slow. You couldn't even read my shadow, let alone my keystrokes.",
+    defeatQuote: 'Corrupted frame... cannot sync inputs...',
+    uniqueMoveName: 'Phantom Cross-Blink',
+    uniqueMoveDesc: 'Instant shadow dash followed by a lethal dual-blade cross slash.'
   },
   {
     id: 'zenko',
@@ -53,7 +63,12 @@ export const CHARACTERS: Character[] = [
       power: 100,
       agility: 70
     },
-    attackDescription: 'Brings down a thunderous spirit war hammer creating golden shock tremors.'
+    attackDescription: 'Brings down a thunderous spirit war hammer creating golden shock tremors.',
+    finisherName: 'SEISMIC JUDGMENT: TITAN HEAVEN-BREAK',
+    finisherQuote: 'Patience and discipline crush haste every time. Meditate on your defeat.',
+    defeatQuote: 'The mountain trembles... but my spirit stands firm.',
+    uniqueMoveName: 'Titan Earth-Breaker',
+    uniqueMoveDesc: 'Leaps high and brings down a colossal hammer strike creating a shockwave fissure.'
   },
   {
     id: 'nova',
@@ -71,7 +86,12 @@ export const CHARACTERS: Character[] = [
       power: 80,
       agility: 94
     },
-    attackDescription: 'Hurls a spiraling purple chain sickle that rips through shadow barriers.'
+    attackDescription: 'Hurls a spiraling purple chain sickle that rips through shadow barriers.',
+    finisherName: 'KITSUNE CURSE: CELESTIAL BIND',
+    finisherQuote: 'Dance in the purple mist. Every thread of fate was tied to your loss.',
+    defeatQuote: 'The illusions fade... well played, warrior.',
+    uniqueMoveName: 'Kitsune Phantom Spiral',
+    uniqueMoveDesc: 'Acrobatic backflip roundhouse kick followed by an ethereal chain sickle sweep.'
   },
   {
     id: 'zephyr',
@@ -89,7 +109,12 @@ export const CHARACTERS: Character[] = [
       power: 82,
       agility: 92
     },
-    attackDescription: 'Thrusts a jade energy spear wrapped in turbulent wind vortices.'
+    attackDescription: 'Thrusts a jade energy spear wrapped in turbulent wind vortices.',
+    finisherName: 'TEMPEST DRAGON: PIERCING GALE',
+    finisherQuote: 'The jade wind sweeps away all resistance. Smooth like a breeze, sharp like a spear.',
+    defeatQuote: 'The wind scatters... you caught the current.',
+    uniqueMoveName: 'Gale Piercer Rush',
+    uniqueMoveDesc: 'Supersonic forward spear lunge and spinning hurricane dropkick.'
   },
   {
     id: 'raven',
@@ -107,7 +132,12 @@ export const CHARACTERS: Character[] = [
       power: 96,
       agility: 80
     },
-    attackDescription: 'Swings an enormous obsidian scythe reaping opponent life-force in indigo flame.'
+    attackDescription: 'Swings an enormous obsidian scythe reaping opponent life-force in indigo flame.',
+    finisherName: 'ECLIPSE HARVEST: SOUL CONDEMNATION',
+    finisherQuote: 'The scythe falls without mercy. Your spirit belongs to the shadows now.',
+    defeatQuote: 'The darkness recedes... for now.',
+    uniqueMoveName: 'Soul Cleave Execution',
+    uniqueMoveDesc: 'Feathered shadow wing swoop with a sweeping crescent scythe uppercut.'
   }
 ];
 

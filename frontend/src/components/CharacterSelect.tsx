@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { CHARACTERS } from '../data/characters';
 import type { Character, GameMode, BotDifficulty } from '../types/game';
 import { sound } from '../utils/sound';
-import { Swords, Gauge, Flame, Wind, Play, Wifi, Sparkles } from 'lucide-react';
+import { Swords, Gauge, Flame, Wind, Play, Wifi, Sparkles, Globe } from 'lucide-react';
+import { getServerUrl, setServerUrl, REMOTE_PRODUCTION_BACKEND, LOCAL_DEV_BACKEND } from '../utils/socketClient';
 
 interface CharacterSelectProps {
   mode: GameMode;
@@ -190,13 +191,49 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
           <div className="battle-config-card">
             {mode === 'online-duel' ? (
               <div className="online-duel-config">
+                {/* Combat Server Switcher */}
                 <div className="config-row">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span className="config-title">MULTIPLAYER SESSION ID</span>
+                  <span className="config-title">COMBAT SERVER</span>
+                  <div className="server-selector-group">
                     <button
                       type="button"
-                      className="pill-btn"
-                      style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                      className={`server-toggle-btn ${!getServerUrl().includes('onrender.com') ? 'active' : ''}`}
+                      onClick={() => {
+                        const localTarget =
+                          typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+                            ? `http://${window.location.hostname}:3001`
+                            : LOCAL_DEV_BACKEND;
+                        setServerUrl(localTarget);
+                        sound.playKeyClick();
+                      }}
+                    >
+                      <Wifi size={14} />
+                      <span>LOCAL WI-FI</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`server-toggle-btn ${getServerUrl().includes('onrender.com') ? 'active' : ''}`}
+                      onClick={() => {
+                        setServerUrl(REMOTE_PRODUCTION_BACKEND);
+                        sound.playKeyClick();
+                      }}
+                    >
+                      <Globe size={14} />
+                      <span>CLOUD ARENA</span>
+                    </button>
+                  </div>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                    Active Server: <code style={{ color: 'var(--neon-cyan)' }}>{getServerUrl()}</code>
+                  </p>
+                </div>
+
+                {/* Session ID */}
+                <div className="config-row">
+                  <div className="online-session-input-header">
+                    <span className="config-title">ROOM SESSION ID</span>
+                    <button
+                      type="button"
+                      className="random-session-btn"
                       onClick={() => setOnlineSessionId(`arena-${Math.floor(100 + Math.random() * 900)}`)}
                     >
                       GENERATE RANDOM
@@ -211,8 +248,20 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
                     placeholder="e.g. arena-1"
                     maxLength={24}
                   />
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                    Both players must enter the exact same Session ID to connect to the same battle room.
+                  <div className="quick-arena-chips">
+                    {['arena-1', 'arena-2', 'arena-cyber'].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        className={`arena-chip ${onlineSessionId === preset ? 'active' : ''}`}
+                        onClick={() => setOnlineSessionId(preset)}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                  <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                    Both players (Desktop &amp; Mobile) must enter the <strong>exact same Session ID</strong> and be on the same server to duel.
                   </p>
                 </div>
               </div>

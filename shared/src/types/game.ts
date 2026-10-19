@@ -21,6 +21,11 @@ export interface Character {
   stats: CharacterStats;
   weaponType: WeaponType;
   attackDescription: string;
+  finisherName: string;
+  finisherQuote: string;
+  defeatQuote: string;
+  uniqueMoveName: string;
+  uniqueMoveDesc: string;
 }
 
 export type CombatAnimationState =
@@ -28,6 +33,9 @@ export type CombatAnimationState =
   | 'walk'
   | 'dash'
   | 'attack'
+  | 'punch'
+  | 'kick'
+  | 'unique'
   | 'hit'
   | 'dodge'
   | 'finisher'

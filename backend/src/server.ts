@@ -60,8 +60,8 @@ const matchManager = new MatchManager();
 setupSocketHandlers(io, matchManager);
 
 if (CONFIG.NODE_ENV !== 'test') {
-  server.listen(CONFIG.PORT, () => {
-    console.log(`[Type Fighter Backend] Core running on port ${CONFIG.PORT}`);
+  server.listen(CONFIG.PORT, '0.0.0.0', () => {
+    console.log(`[Type Fighter Backend] Core running on port ${CONFIG.PORT} (0.0.0.0)`);
     console.log(`[Type Fighter Backend] Allowed origin: ${CONFIG.CLIENT_ORIGIN}`);
   });
 }

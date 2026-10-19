@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import type { Character, FloatingText, Particle } from '../types/game';
-
+import type { Character, FloatingText, Particle, CombatAnimationState } from '../types/game';
+import { CHARACTERS } from '../data/characters';
 import { sound } from '../utils/sound';
 import { calculateWordDamage } from '../utils/combatMath';
 import { processTypingInput } from '../utils/typingEngine';
 import { ShadowFighterSprite } from './ShadowFighterSprite';
-import { Swords, RotateCcw, Target, Zap, Flame, Sparkles, StopCircle, ArrowLeft } from 'lucide-react';
+import { Swords, RotateCcw, Target, Zap, Flame, Sparkles, StopCircle, ArrowLeft, RefreshCw } from 'lucide-react';
 import { PracticeSummaryModal, type PracticeStats } from './PracticeSummaryModal';
 import { geminiSentenceService } from '../utils/geminiSentenceService';
 
@@ -27,7 +27,14 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
   const [correctKeystrokes, setCorrectKeystrokes] = useState(0);
   const [mistakes, setMistakes] = useState(0);
   const [wordsCompleted, setWordsCompleted] = useState(0);
-  const [animState, setAnimState] = useState<'idle' | 'attack'>('idle');
+
+  // Two-Fighter Sparring State
+  const [p1AnimState, setP1AnimState] = useState<CombatAnimationState>('idle');
+  const [sparringPartner, setSparringPartner] = useState<Character>(() => {
+    return CHARACTERS.find((c) => c.id !== character.id) || CHARACTERS[1];
+  });
+  const [partnerAnimState, setPartnerAnimState] = useState<CombatAnimationState>('idle');
+  const [currentTechnique, setCurrentTechnique] = useState<string | null>(null);
 
   // Practice Summary Modal state
   const [showSummary, setShowSummary] = useState(false);
@@ -151,6 +158,55 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
     return () => cancelAnimationFrame(frame);
   }, [particles]);
 
+  const handleCyclePartner = () => {
+    const currentIndex = CHARACTERS.findIndex((c) => c.id === sparringPartner.id);
+    const nextPartner = CHARACTERS[(currentIndex + 1) % CHARACTERS.length];
+    setSparringPartner(nextPartner);
+    sound.playKeyClick();
+  };
+
+  // Ambient martial arts sparring demonstration loop ("just for showing")
+  useEffect(() => {
+    if (showSummary) return;
+
+    const ambientTimer = setInterval(() => {
+      // If neither warrior is currently attacking, perform an ambient sparring exchange
+      setP1AnimState((currentP1) => {
+        if (currentP1 !== 'idle') return currentP1;
+
+        const partnerAttacks = Math.random() > 0.5;
+        if (partnerAttacks) {
+          const move = Math.random() > 0.5 ? 'kick' : 'punch';
+          setPartnerAnimState(move);
+          sound.playDash();
+          if (move === 'kick') sound.playKick();
+          else sound.playPunch();
+          setCurrentTechnique(`${sparringPartner.name}: SPARRING ${move.toUpperCase()}`);
+
+          setTimeout(() => {
+            setPartnerAnimState('idle');
+            setCurrentTechnique(null);
+          }, 450);
+          return 'idle';
+        } else {
+          const move = Math.random() > 0.5 ? 'kick' : 'punch';
+          sound.playDash();
+          if (move === 'kick') sound.playKick();
+          else sound.playPunch();
+          setCurrentTechnique(`${character.name}: SPARRING ${move.toUpperCase()}`);
+
+          setTimeout(() => {
+            setP1AnimState('idle');
+            setCurrentTechnique(null);
+          }, 450);
+          return move;
+        }
+      });
+    }, 4500);
+
+    return () => clearInterval(ambientTimer);
+  }, [showSummary, character.name, sparringPartner.name]);
+
   const handleInputChange = (value: string) => {
     if (showSummary) return;
     const prevLen = userInput.length;
@@ -200,13 +256,45 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
         result.nextState.combo,
         character.stats.power
       );
-      sound.playAttack(character.weaponType);
+
+      // Martial arts rotation: Punch -> Kick -> Weapon Slash -> Unique Move
+      const step = result.nextState.combo % 4;
+      let moveAnim: CombatAnimationState = 'punch';
+      let moveLabel = 'PUNCH';
+
+      sound.playDash();
+      if (result.isSentenceCompleted || isCritical || step === 3) {
+        moveAnim = 'unique';
+        moveLabel = character.uniqueMoveName;
+        sound.playUltimate();
+        sound.playAttack(character.weaponType);
+      } else if (step === 1) {
+        moveAnim = 'kick';
+        moveLabel = 'HIGH KICK';
+        sound.playKick();
+      } else if (step === 2) {
+        moveAnim = 'attack';
+        moveLabel = `${character.weapon.toUpperCase()}`;
+        sound.playAttack(character.weaponType);
+      } else {
+        moveAnim = 'punch';
+        moveLabel = 'FIST STRIKE';
+        sound.playPunch();
+      }
+
       if (result.nextState.combo > 2) sound.playCombo(result.nextState.combo);
 
-      setAnimState('attack');
-      setTimeout(() => setAnimState('idle'), 350);
+      setP1AnimState(moveAnim);
+      setPartnerAnimState('hit');
+      setCurrentTechnique(moveLabel);
+
+      setTimeout(() => {
+        setP1AnimState('idle');
+        setPartnerAnimState('idle');
+      }, 420);
+
       setWordsCompleted((prev) => prev + 1);
-      triggerFX(isCritical ? `CRIT +${damage}` : `+${damage}`, isCritical ? 'critical' : 'damage');
+      triggerFX(isCritical ? `CRIT ${moveLabel} +${damage}` : `${moveLabel} +${damage}`, isCritical ? 'critical' : 'damage');
 
       const words = result.nextState.userInput.trim().split(/\s+/);
       lastTypedWordIndexRef.current = words.length;
@@ -299,9 +387,28 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
         </div>
       </div>
 
-      {/* Mini Shadow Stage */}
+      {/* 2-Fighter Dojo Sparring Arena Stage */}
       <div className="practice-stage-card">
         <div className="practice-stage-backdrop" />
+
+        {/* Switch Sparring Partner Button */}
+        <button
+          type="button"
+          className="practice-partner-selector-chip"
+          onClick={handleCyclePartner}
+          title="Switch sparring partner warrior"
+        >
+          <RefreshCw size={12} />
+          <span>SPARRING RIVAL: <strong>{sparringPartner.name}</strong> [SWITCH]</span>
+        </button>
+
+        {/* Dynamic Sparring Technique Banner */}
+        {currentTechnique && (
+          <div className="practice-sparring-banner">
+            <Zap size={14} />
+            <span>{currentTechnique.toUpperCase()}</span>
+          </div>
+        )}
 
         {/* Floating FX */}
         <div className="arena-floating-texts">
@@ -338,18 +445,48 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
           ))}
         </div>
 
-        {/* Shadow Warrior Center Showcase */}
-        <div className="practice-fighter-center">
-          <ShadowFighterSprite
-            character={character}
-            animation={animState}
-            isFacingRight={true}
-          />
-          <div className="practice-fighter-meta">
-            <span className="practice-fighter-name" style={{ color: character.themeColor }}>
-              {character.name}
-            </span>
-            <span className="practice-fighter-tagline">"{character.tagline}"</span>
+        {/* Ground Battle Platform */}
+        <div className="arena-ground-platform">
+          <div className="platform-stone-texture" />
+        </div>
+
+        {/* 2 Fighters Sparring Stage */}
+        <div className="practice-fighters-arena">
+          {/* Left Fighter: Player Warrior */}
+          <div className="fighter-position-slot p1-slot">
+            <ShadowFighterSprite
+              character={character}
+              animation={p1AnimState}
+              isFacingRight={true}
+            />
+            <div className="fighter-ground-indicator">
+              <span className="fighter-name-tag" style={{ color: character.themeColor }}>
+                {character.name} (YOU)
+              </span>
+              <span className="fighter-title-sub">{character.title}</span>
+            </div>
+          </div>
+
+          {/* Center Dynamic Clash Impact Spark */}
+          {(p1AnimState !== 'idle' || partnerAnimState !== 'idle') && (
+            <div className="clash-impact-flare">
+              <div className="clash-spark-core" />
+            </div>
+          )}
+
+          {/* Right Fighter: Sparring Partner */}
+          <div className="fighter-position-slot p2-slot">
+            <ShadowFighterSprite
+              character={sparringPartner}
+              animation={partnerAnimState}
+              isFacingRight={false}
+            />
+            <div className="fighter-ground-indicator">
+              <span className="fighter-name-tag" style={{ color: sparringPartner.themeColor }}>
+                {sparringPartner.name} (RIVAL)
+              </span>
+              <span className="fighter-title-sub">{sparringPartner.title}</span>
+            </div>
           </div>
         </div>
       </div>
