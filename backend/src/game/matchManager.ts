@@ -24,7 +24,7 @@ import {
 const RATE_LIMIT_WINDOW_MS = 1000;
 const MAX_INPUTS_PER_WINDOW = 30; // Max 30 keystrokes/sec
 const RECONNECT_GRACE_MS = 15000; // 15 seconds grace period
-const MATCH_DURATION_SECS = 75;
+const MATCH_DURATION_SECS = 180;
 
 export class MatchManager {
   private sessions = new Map<string, MatchSession>();

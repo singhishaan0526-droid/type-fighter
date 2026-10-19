@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { Character, FloatingText, Particle } from '../types/game';
-import { BATTLE_SENTENCES, getRandomSentence } from '../data/sentences';
+
 import { sound } from '../utils/sound';
 import { calculateWordDamage } from '../utils/combatMath';
 import { processTypingInput } from '../utils/typingEngine';
 import { ShadowFighterSprite } from './ShadowFighterSprite';
-import { Swords, RotateCcw, Target, Zap, Flame, Sparkles } from 'lucide-react';
+import { Swords, RotateCcw, Target, Zap, Flame, Sparkles, StopCircle, ArrowLeft } from 'lucide-react';
+import { PracticeSummaryModal, type PracticeStats } from './PracticeSummaryModal';
+import { geminiSentenceService } from '../utils/geminiSentenceService';
 
 interface PracticeModeProps {
   character: Character;
@@ -14,7 +16,7 @@ interface PracticeModeProps {
 
 export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit }) => {
   const [currentCategory, setCurrentCategory] = useState<'all' | 'classic' | 'combat' | 'cyber'>('all');
-  const [currentSentence, setCurrentSentence] = useState('The quick brown fox jumps over the lazy dog.');
+  const [currentSentence, setCurrentSentence] = useState(() => geminiSentenceService.getNextSentence());
   const [userInput, setUserInput] = useState('');
   const [hasError, setHasError] = useState(false);
   const [combo, setCombo] = useState(0);
@@ -26,6 +28,10 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
   const [mistakes, setMistakes] = useState(0);
   const [wordsCompleted, setWordsCompleted] = useState(0);
   const [animState, setAnimState] = useState<'idle' | 'attack'>('idle');
+
+  // Practice Summary Modal state
+  const [showSummary, setShowSummary] = useState(false);
+  const [finalStats, setFinalStats] = useState<PracticeStats | null>(null);
 
   // Visual FX
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
@@ -42,11 +48,9 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
     }
   }, []);
 
-  // Filter sentences by category
+  // Filter sentences by category (uses Gemini AI dynamically)
   const getSentenceForCategory = (cat: 'all' | 'classic' | 'combat' | 'cyber') => {
-    if (cat === 'all') return getRandomSentence();
-    const filtered = BATTLE_SENTENCES.filter((s) => s.category === cat);
-    return filtered[Math.floor(Math.random() * filtered.length)].text;
+    return geminiSentenceService.getNextSentence(currentSentence, cat === 'all' ? 'combat' : cat);
   };
 
   const handleSwitchCategory = (cat: 'all' | 'classic' | 'combat' | 'cyber') => {
@@ -68,10 +72,34 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
     setAccuracy(100);
     setTotalKeystrokes(0);
     setCorrectKeystrokes(0);
+    setMistakes(0);
     setWordsCompleted(0);
     lastTypedWordIndexRef.current = 0;
+    maxCorrectIndexRef.current = 0;
     startTimeRef.current = Date.now();
+    setShowSummary(false);
+    setFinalStats(null);
     if (inputRef.current) inputRef.current.focus({ preventScroll: true });
+  };
+
+  // User explicitly clicks "END" to finish the endless session and see diagnostics
+  const handleEndSession = () => {
+    const elapsedSecs = Math.max(1, Math.round((Date.now() - startTimeRef.current) / 1000));
+    sound.playVictory();
+
+    const stats: PracticeStats = {
+      wpm,
+      accuracy,
+      wordsTyped: wordsCompleted,
+      totalKeystrokes,
+      correctKeystrokes,
+      mistakes,
+      maxCombo,
+      elapsedSeconds: elapsedSecs
+    };
+
+    setFinalStats(stats);
+    setShowSummary(true);
   };
 
   const triggerFX = (text: string, type: 'damage' | 'critical' | 'combo' | 'miss') => {
@@ -124,6 +152,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
   }, [particles]);
 
   const handleInputChange = (value: string) => {
+    if (showSummary) return;
     const prevLen = userInput.length;
     const elapsedSecs = Math.max(1, (Date.now() - startTimeRef.current) / 1000);
 
@@ -225,13 +254,16 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
       {/* Top Controls & Category Filter */}
       <div className="practice-header-bar">
         <div className="practice-title-group">
+          <button className="practice-back-btn" onClick={onExit} title="Back to Character Select">
+            <ArrowLeft size={16} />
+          </button>
           <div className="practice-icon-badge" style={{ borderColor: character.themeColor }}>
-            <Sparkles size={20} style={{ color: character.themeColor }} />
+            <Sparkles size={18} style={{ color: character.themeColor }} />
           </div>
           <div>
-            <h2 className="practice-title">DOJO PRACTICE</h2>
+            <h2 className="practice-title">FREE PRACTICE DOJO</h2>
             <span className="practice-subtitle">
-              PRACTICING WITH {character.name} &bull; {character.weapon.toUpperCase()}
+              ENDLESS TYPING &bull; {character.name.toUpperCase()}
             </span>
           </div>
         </div>
@@ -250,11 +282,19 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
 
         <div className="practice-action-buttons">
           <button className="practice-reset-btn" onClick={handleReset} title="Reset Speed Drill">
-            <RotateCcw size={15} />
+            <RotateCcw size={14} />
             <span>RESET</span>
           </button>
-          <button className="practice-exit-btn" onClick={onExit}>
-            <span>EXIT DOJO</span>
+
+          {/* Dedicated END SESSION Button */}
+          <button
+            id="end-practice-session-btn"
+            className="practice-end-btn"
+            onClick={handleEndSession}
+            title="End typing session and view full WPM and accuracy diagnostics"
+          >
+            <StopCircle size={16} />
+            <span>END SESSION</span>
           </button>
         </div>
       </div>
@@ -262,7 +302,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
       {/* Mini Shadow Stage */}
       <div className="practice-stage-card">
         <div className="practice-stage-backdrop" />
-        
+
         {/* Floating FX */}
         <div className="arena-floating-texts">
           {floatingTexts.map((ft) => (
@@ -316,55 +356,82 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
 
       {/* Target Sentence Box */}
       <div className={`practice-prompt-card ${hasError ? 'console-shake' : ''}`}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem', padding: '0 0.2rem' }}>
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>TARGET PHRASE:</span>
+          {geminiSentenceService.isAIGenerated(currentSentence) && (
+            <span className="ai-sentence-badge" title="Generated in real-time by Google Gemini AI">
+              <Sparkles size={12} color="#00e5ff" />
+              <span>GEMINI AI</span>
+            </span>
+          )}
+        </div>
         <div className="target-sentence-box">
-          <div className="sentence-text-stream">
-            {renderChars()}
-          </div>
+          <div className="sentence-text-stream">{renderChars()}</div>
         </div>
 
-        {/* Input */}
+        {/* Input Bar with Quick End CTA */}
         <div className="typing-input-wrapper">
           <input
             ref={inputRef}
             type="text"
             value={userInput}
             onChange={(e) => handleInputChange(e.target.value)}
-            placeholder="Type at your own rhythm to practice..."
+            placeholder="Type freely at your own speed... Click 'END SESSION' when done."
             className={`typing-input ${hasError ? 'input-error' : ''}`}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
           />
+          <button
+            className="input-end-trigger-btn"
+            onClick={handleEndSession}
+            title="Finish practice and view typing metrics"
+          >
+            <StopCircle size={15} />
+            <span>END</span>
+          </button>
         </div>
 
         {/* Metrics Bar */}
         <div className="practice-metrics-bar">
           <div className="metric-pill">
-            <Zap size={16} style={{ color: character.themeColor }} />
-            <span className="metric-label">CURRENT SPEED:</span>
-            <span className="metric-value" style={{ color: character.themeColor }}>{wpm} WPM</span>
+            <Zap size={15} style={{ color: character.themeColor }} />
+            <span className="metric-label">SPEED:</span>
+            <span className="metric-value" style={{ color: character.themeColor }}>
+              {wpm} WPM
+            </span>
           </div>
 
           <div className="metric-pill">
-            <Target size={16} />
+            <Target size={15} />
             <span className="metric-label">ACCURACY:</span>
             <span className="metric-value">{accuracy}%</span>
           </div>
 
           <div className="metric-pill">
-            <Flame size={16} />
+            <Flame size={15} />
             <span className="metric-label">COMBO:</span>
-            <span className="metric-value">{combo}x (MAX {maxCombo}x)</span>
+            <span className="metric-value">{combo}x</span>
           </div>
 
           <div className="metric-pill">
-            <Swords size={16} />
-            <span className="metric-label">WORDS COMPLETED:</span>
+            <Swords size={15} />
+            <span className="metric-label">WORDS:</span>
             <span className="metric-value">{wordsCompleted}</span>
           </div>
         </div>
       </div>
+
+      {/* Dedicated Practice Summary Diagnostics Modal */}
+      {showSummary && finalStats && (
+        <PracticeSummaryModal
+          stats={finalStats}
+          character={character}
+          onPracticeAgain={handleReset}
+          onExit={onExit}
+        />
+      )}
     </div>
   );
 };

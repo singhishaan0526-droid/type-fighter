@@ -13,7 +13,7 @@ import { BattleResultModal } from './BattleResultModal';
 import { CHARACTER_ULTIMATES } from '../types/abilities';
 import { saveMatchRecord } from '../utils/recordManager';
 import { processTypingInput } from '../utils/typingEngine';
-import { getRandomSentence } from '../data/sentences';
+import { geminiSentenceService } from '../utils/geminiSentenceService';
 
 interface LocalBattleProps {
   p1Character: Character;
@@ -30,17 +30,18 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
   difficulty,
   onReturnToSelect
 }) => {
-  // Target sentence - starts with classic PRD sentence
-  const [currentSentence, setCurrentSentence] = useState('The quick brown fox jumps over the lazy dog.');
+  // Target sentence - fetched dynamically via Gemini API with queueing
+  const [currentSentence, setCurrentSentence] = useState(() => geminiSentenceService.getNextSentence());
   const [userInput, setUserInput] = useState('');
   const [hasInputError, setHasInputError] = useState(false);
 
   // Time & Match flow
-  const [timeLeft, setTimeLeft] = useState(75); // 75 seconds battle timer
+  const [timeLeft, setTimeLeft] = useState(180); // 3 minutes (180s) battle timer
   const [battleResult, setBattleResult] = useState<BattleResult | null>(null);
   const [matchActive, setMatchActive] = useState(true);
   const [countdown, setCountdown] = useState<number | null>(3);
   const [isScreenShaking, setIsScreenShaking] = useState(false);
+  const [roundBanner, setRoundBanner] = useState<string | null>(null);
 
   // FX: Floating texts & Particles
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
@@ -73,8 +74,8 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
   // Player 1 Fighter State
   const [p1State, setP1State] = useState<FighterState>({
     character: p1Character,
-    maxHp: 100,
-    currentHp: 100,
+    maxHp: 250,
+    currentHp: 250,
     combo: 0,
     maxCombo: 0,
     animation: 'idle',
@@ -93,8 +94,8 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
   // Player 2 / Bot Fighter State
   const [p2State, setP2State] = useState<FighterState>({
     character: p2Character,
-    maxHp: 100,
-    currentHp: 100,
+    maxHp: 250,
+    currentHp: 250,
     combo: 0,
     maxCombo: 0,
     animation: 'idle',
@@ -113,6 +114,8 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
   const startTimeRef = useRef<number>(Date.now());
   const lastTypedWordIndexRef = useRef<number>(0);
   const botComboRef = useRef<number>(0);
+  const p1KnockdownsRef = useRef<number>(0);
+  const p2KnockdownsRef = useRef<number>(0);
   const isBattleFinishedRef = useRef<boolean>(false);
   const maxCorrectIndexRef = useRef<number>(0);
   const isAdvancingSentenceRef = useRef<boolean>(false);
@@ -265,18 +268,48 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     }
   }, [p1Character, p2Character, difficulty, mode, triggerScreenShake]);
 
-  // Check HP thresholds
+  // Check HP thresholds - Sustained 3-Minute Typing Battle
   useEffect(() => {
     if (!matchActive || isBattleFinishedRef.current || battleResult) return;
 
     if (p2State.currentHp <= 0) {
-      finishBattle('player1');
-    } else if (p1State.currentHp <= 0) {
-      finishBattle('player2');
-    }
-  }, [matchActive, p1State.currentHp, p2State.currentHp, battleResult, finishBattle]);
+      p1KnockdownsRef.current += 1;
+      sound.playCombo(p1KnockdownsRef.current);
+      triggerImpactFX('p2', 'KNOCKDOWN! +1 PT', 'critical', '#ffb703');
+      triggerScreenShake();
+      setRoundBanner(`⚡ KNOCKDOWN! ${p1Character.name.toUpperCase()} SCORES A ROUND POINT! (${p1KnockdownsRef.current} - ${p2KnockdownsRef.current})`);
+      setTimeout(() => setRoundBanner(null), 2500);
 
-  // Battle Countdown Timer
+      // Opponent recovers HP so the 3-minute typing practice continues
+      setP2State((prev) => ({
+        ...prev,
+        currentHp: prev.maxHp,
+        animation: 'hit'
+      }));
+      setTimeout(() => {
+        setP2State((prev) => ({ ...prev, animation: 'idle' }));
+      }, 400);
+    } else if (p1State.currentHp <= 0) {
+      p2KnockdownsRef.current += 1;
+      sound.playError();
+      triggerImpactFX('p1', 'KNOCKDOWN!', 'miss', '#ff2a5f');
+      triggerScreenShake();
+      setRoundBanner(`⚠️ KNOCKDOWN! ${p2Character.name.toUpperCase()} SCORES A ROUND POINT! (${p1KnockdownsRef.current} - ${p2KnockdownsRef.current})`);
+      setTimeout(() => setRoundBanner(null), 2500);
+
+      // Player recovers HP so the 3-minute typing practice continues
+      setP1State((prev) => ({
+        ...prev,
+        currentHp: prev.maxHp,
+        animation: 'hit'
+      }));
+      setTimeout(() => {
+        setP1State((prev) => ({ ...prev, animation: 'idle' }));
+      }, 400);
+    }
+  }, [matchActive, p1State.currentHp, p2State.currentHp, battleResult, p1Character.name, p2Character.name, triggerImpactFX, triggerScreenShake]);
+
+  // Battle Countdown Timer (3 Minutes = 180 Seconds)
   useEffect(() => {
     if (battleResult || countdown !== null || !matchActive) return;
 
@@ -292,16 +325,23 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
           const p1Progress = (input.length / sentenceLen) * 100;
           const p2Progress = (p2.correctKeystrokes / sentenceLen) * 100;
 
-          const winner = evaluateWinner(
-            p1.currentHp,
-            p1.accuracy,
-            p2.currentHp,
-            p2.accuracy,
-            p1Progress,
-            p2Progress,
-            p1.maxHp,
-            p2.maxHp
-          );
+          let winner: 'player1' | 'player2' | 'draw';
+          if (p1KnockdownsRef.current > p2KnockdownsRef.current) {
+            winner = 'player1';
+          } else if (p2KnockdownsRef.current > p1KnockdownsRef.current) {
+            winner = 'player2';
+          } else {
+            winner = evaluateWinner(
+              p1.currentHp,
+              p1.accuracy,
+              p2.currentHp,
+              p2.accuracy,
+              p1Progress,
+              p2Progress,
+              p1.maxHp,
+              p2.maxHp
+            );
+          }
           finishBattle(winner);
           return 0;
         }
@@ -337,12 +377,12 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
   useEffect(() => {
     if (mode !== 'vs-bot' || battleResult || isBattleFinishedRef.current || !matchActive || countdown !== null) return;
 
-    // Difficulty tuning
+    // Difficulty tuning - Calibrated for typing speed improvement
     const config = {
-      easy: { intervalMin: 1400, intervalMax: 1800, targetWpm: 42, powerScale: 0.8 },
-      medium: { intervalMin: 850, intervalMax: 1150, targetWpm: 65, powerScale: 1.0 },
-      hard: { intervalMin: 600, intervalMax: 850, targetWpm: 88, powerScale: 1.2 },
-      master: { intervalMin: 420, intervalMax: 620, targetWpm: 110, powerScale: 1.4 }
+      easy: { intervalMin: 2600, intervalMax: 3400, targetWpm: 20, powerScale: 0.5 },
+      medium: { intervalMin: 1500, intervalMax: 1900, targetWpm: 35, powerScale: 0.75 },
+      hard: { intervalMin: 950, intervalMax: 1250, targetWpm: 55, powerScale: 1.0 },
+      master: { intervalMin: 650, intervalMax: 850, targetWpm: 80, powerScale: 1.25 }
     }[difficulty];
 
     let isMounted = true;
@@ -378,7 +418,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
             animation: 'attack',
             combo: nextCombo,
             maxCombo: Math.max(prev.maxCombo, nextCombo),
-            wpm: config.targetWpm + Math.floor(Math.random() * 6 - 3),
+            wpm: Math.max(10, config.targetWpm + Math.floor(Math.random() * 5 - 2)),
             damageDealt: prev.damageDealt + finalDamage,
             correctKeystrokes: nextCorrect,
             totalKeystrokes: Math.round(nextCorrect / 0.94)
@@ -683,7 +723,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     if (result.isSentenceCompleted) {
       if (isAdvancingSentenceRef.current) return;
       isAdvancingSentenceRef.current = true;
-      const nextSentence = getRandomSentence(currentSentence);
+      const nextSentence = geminiSentenceService.getNextSentence(currentSentence);
       setCurrentSentence(nextSentence);
       currentSentenceRef.current = nextSentence;
       setUserInput('');
@@ -710,7 +750,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
 
     setP1State((prev) => ({
       ...prev,
-      currentHp: 100,
+      currentHp: prev.maxHp,
       combo: 0,
       maxCombo: 0,
       animation: 'idle',
@@ -728,7 +768,7 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
 
     setP2State((prev) => ({
       ...prev,
-      currentHp: 100,
+      currentHp: prev.maxHp,
       combo: 0,
       maxCombo: 0,
       animation: 'idle',
@@ -744,10 +784,15 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
       hasHasteBuff: false
     }));
 
-    setCurrentSentence('The quick brown fox jumps over the lazy dog.');
+    const freshSentence = geminiSentenceService.getNextSentence();
+    setCurrentSentence(freshSentence);
+    currentSentenceRef.current = freshSentence;
     setUserInput('');
     setHasInputError(false);
-    setTimeLeft(75);
+    setTimeLeft(180);
+    p1KnockdownsRef.current = 0;
+    p2KnockdownsRef.current = 0;
+    setRoundBanner(null);
     setCountdown(3);
     setFloatingTexts([]);
     setParticles([]);
@@ -758,6 +803,13 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
 
   return (
     <div className="battle-screen-layout">
+      {/* Round Knockdown Banner */}
+      {roundBanner && (
+        <div className="battle-round-banner">
+          <span>{roundBanner}</span>
+        </div>
+      )}
+
       {/* Top HUD with HP Bars & Match Timer */}
       <BattleHUD
         p1State={p1State}

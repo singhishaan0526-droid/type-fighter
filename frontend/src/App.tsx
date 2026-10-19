@@ -7,9 +7,19 @@ import { LocalBattle } from './components/LocalBattle';
 import { PracticeMode } from './components/PracticeMode';
 import { OnlineBattle } from './components/OnlineBattle';
 import { RecordsModal } from './components/RecordsModal';
+import { LandingPage, type UserProfile } from './components/LandingPage';
 import './index.css';
 
 export const App: React.FC = () => {
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    try {
+      const saved = localStorage.getItem('typewriter_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
   const [phase, setPhase] = useState<'select' | 'battle'>('select');
   const [mode, setMode] = useState<GameMode>('vs-bot');
   const [p1Char, setP1Char] = useState<Character>(CHARACTERS[0]); // Byte
@@ -17,6 +27,25 @@ export const App: React.FC = () => {
   const [difficulty, setDifficulty] = useState<BotDifficulty>('medium');
   const [onlineSessionId, setOnlineSessionId] = useState('arena-1');
   const [isRecordsOpen, setIsRecordsOpen] = useState(false);
+
+  const handleLogin = (newUser: UserProfile) => {
+    setUser(newUser);
+    try {
+      localStorage.setItem('typewriter_user', JSON.stringify(newUser));
+    } catch {
+      // safe fallback
+    }
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    try {
+      localStorage.removeItem('typewriter_user');
+    } catch {
+      // safe fallback
+    }
+    setPhase('select');
+  };
 
   const handleStartBattle = (
     p1: Character,
@@ -37,6 +66,11 @@ export const App: React.FC = () => {
     setPhase('select');
   };
 
+  // If user is not authenticated via Guest or Google, show Landing Page
+  if (!user) {
+    return <LandingPage onLogin={handleLogin} />;
+  }
+
   return (
     <div className="game-app-container">
       {/* Global Background Glow FX */}
@@ -45,10 +79,17 @@ export const App: React.FC = () => {
       {/* Main Navbar */}
       <Navbar
         mode={mode}
-        onSelectMode={(newMode) => setMode(newMode)}
+        onSelectMode={(newMode) => {
+          setMode(newMode);
+          if (phase === 'battle') {
+            setPhase('select');
+          }
+        }}
         onReset={handleReturnToSelect}
         onOpenRecords={() => setIsRecordsOpen(true)}
         inBattle={phase === 'battle'}
+        user={user}
+        onLogout={handleLogout}
       />
 
       {/* Main Game Surface */}
@@ -87,7 +128,7 @@ export const App: React.FC = () => {
 
       {/* Subtle Footer */}
       <footer className="game-footer">
-        <span>TYPING BATTLE &bull; PHASE 3 ONLINE BATTLE CORE &bull; TYPE FASTER. FIGHT HARDER.</span>
+        <span>TYPING BATTLE &bull; 3-MIN TOURNAMENT ROUNDS &bull; 20-35 WPM CALIBRATED AI &bull; TYPE FASTER. FIGHT HARDER.</span>
       </footer>
     </div>
   );

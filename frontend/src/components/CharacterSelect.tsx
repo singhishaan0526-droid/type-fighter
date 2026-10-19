@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { CHARACTERS } from '../data/characters';
 import type { Character, GameMode, BotDifficulty } from '../types/game';
 import { sound } from '../utils/sound';
-import { Swords, Gauge, Flame, Wind, Play, Wifi } from 'lucide-react';
+import { Swords, Gauge, Flame, Wind, Play, Wifi, Sparkles } from 'lucide-react';
 
 interface CharacterSelectProps {
   mode: GameMode;
@@ -248,14 +248,24 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
                       >
                         {diff.toUpperCase()}
                         <span className="diff-wpm-hint">
-                          {diff === 'easy' && '~40 WPM'}
-                          {diff === 'medium' && '~65 WPM'}
-                          {diff === 'hard' && '~85 WPM'}
-                          {diff === 'master' && '~110 WPM'}
+                          {diff === 'easy' && '~20 WPM'}
+                          {diff === 'medium' && '~35 WPM'}
+                          {diff === 'hard' && '~55 WPM'}
+                          {diff === 'master' && '~80 WPM'}
                         </span>
                       </button>
                     ))}
                   </div>
+                </div>
+              </div>
+            ) : mode === 'practice' ? (
+              <div className="practice-mode-info-config">
+                <div className="config-row">
+                  <span className="config-title">ENDLESS FREE PRACTICE DOJO</span>
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: '0.3rem' }}>
+                    Type freely without a timer limit. Type as many sentences as you want at your own pace.
+                    Click <strong>END SESSION</strong> anytime to display your comprehensive WPM, accuracy, and keystroke metrics.
+                  </p>
                 </div>
               </div>
             ) : (
@@ -286,8 +296,14 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
                 boxShadow: `0 0 25px ${selectedP1.accentGlow}`
               }}
             >
-              {mode === 'online-duel' ? <Wifi size={20} /> : <Swords size={20} />}
-              <span>{mode === 'online-duel' ? 'CONNECT TO ARENA' : 'COMMENCE BATTLE'}</span>
+              {mode === 'online-duel' ? <Wifi size={20} /> : mode === 'practice' ? <Sparkles size={20} /> : <Swords size={20} />}
+              <span>
+                {mode === 'online-duel'
+                  ? 'CONNECT TO ARENA'
+                  : mode === 'practice'
+                  ? 'ENTER FREE DOJO'
+                  : 'COMMENCE BATTLE'}
+              </span>
               <Play size={18} />
             </button>
           </div>

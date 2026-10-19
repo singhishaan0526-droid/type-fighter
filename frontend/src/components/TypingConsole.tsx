@@ -2,6 +2,7 @@ import { useRef, useEffect } from 'react';
 import type { FighterState } from '../types/game';
 import { CHARACTER_ULTIMATES } from '../types/abilities';
 import { Zap, Target, Flame, Sparkles } from 'lucide-react';
+import { geminiSentenceService } from '../utils/geminiSentenceService';
 
 interface TypingConsoleProps {
   sentence: string;
@@ -91,7 +92,15 @@ export const TypingConsole: React.FC<TypingConsoleProps> = ({
       onClick={handleContainerClick}
     >
       <div className="console-header">
-        <span className="console-prompt-label">Type this sentence:</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <span className="console-prompt-label">Type this sentence:</span>
+          {geminiSentenceService.isAIGenerated(sentence) && (
+            <span className="ai-sentence-badge" title="Generated in real-time by Google Gemini AI">
+              <Sparkles size={12} color="#00e5ff" />
+              <span>GEMINI AI</span>
+            </span>
+          )}
+        </div>
         {p1State.combo >= 5 && (
           <div className="active-streak-pill" style={{ color: p1State.character.themeColor }}>
             <Flame size={14} />

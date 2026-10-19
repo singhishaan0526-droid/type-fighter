@@ -73,7 +73,9 @@ export const BattleHUD: React.FC<BattleHUDProps> = ({
       {/* Center VS & Match Timer */}
       <div className="hud-center-block">
         <div className="timer-badge">
-          <span className="timer-val">{timeLeft}s</span>
+          <span className="timer-val">
+            {Math.floor(timeLeft / 60)}:{(timeLeft % 60) < 10 ? '0' : ''}{timeLeft % 60}
+          </span>
         </div>
         <div className="vs-badge">
           <span className="vs-text">VS</span>
