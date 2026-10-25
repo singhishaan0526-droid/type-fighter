@@ -25,24 +25,20 @@ export interface DamageResult {
 export function calculateWordDamage(
   wordLength: number,
   currentCombo: number,
-  powerStat: number = 80
+  powerStat: number = 80,
+  isEndOfSentence: boolean = false
 ): DamageResult {
-  // Base damage scales with word length (e.g., 5-letter word = ~10 base)
-  const baseDamage = Math.max(5, wordLength * 2);
-
-  // Combo multiplier: +5% per combo point up to +150% (at 30 combo)
+  const baseDamage = Math.max(4, wordLength * 1.5);
   const comboBonus = Math.min(30, currentCombo) * 0.05;
   const comboMultiplier = 1 + comboBonus;
+  const powerScale = 0.7 + (powerStat / 100) * 0.4;
 
-  // Power stat scaling: 70 power -> 0.95x, 100 power -> 1.1x
-  const powerScale = 0.6 + (powerStat / 100) * 0.5;
+  const isCritical = currentCombo >= 10;
+  const critMultiplier = isCritical ? 1.3 : 1.0;
+  const sentenceBonus = isEndOfSentence ? 8 : 0;
 
-  // Critical strike chance when combo is >= 10
-  const isCritical = currentCombo >= 10 && Math.random() < 0.25;
-  const critMultiplier = isCritical ? 1.5 : 1.0;
-
-  const rawDamage = baseDamage * comboMultiplier * powerScale * critMultiplier;
-  const damage = Math.max(1, Math.round(rawDamage));
+  const rawDamage = (baseDamage + sentenceBonus) * comboMultiplier * powerScale * critMultiplier * 0.45;
+  const damage = Math.max(2, Math.round(rawDamage));
 
   return {
     damage,

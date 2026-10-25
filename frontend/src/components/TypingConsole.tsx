@@ -69,7 +69,7 @@ export const TypingConsole: React.FC<TypingConsoleProps> = ({
                 : undefined
           }}
         >
-          {char === ' ' ? '\u00A0' : char}
+          {char}
         </span>
       );
     });

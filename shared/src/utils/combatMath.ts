@@ -25,17 +25,17 @@ export function calculateWordDamage(
   powerStat: number = 80,
   isEndOfSentence: boolean = false
 ): DamageResult {
-  const baseDamage = Math.max(5, wordLength * 2);
+  const baseDamage = Math.max(4, wordLength * 1.5);
   const comboBonus = Math.min(COMBAT_CONSTANTS.MAX_COMBO_BONUS_CAP, currentCombo) * COMBAT_CONSTANTS.COMBO_BONUS_PER_POINT;
   const comboMultiplier = 1 + comboBonus;
-  const powerScale = 0.6 + (powerStat / 100) * 0.5;
+  const powerScale = 0.7 + (powerStat / 100) * 0.4;
 
   const isCritical = currentCombo >= 10;
-  const critMultiplier = isCritical ? 1.35 : 1.0;
-  const sentenceBonus = isEndOfSentence ? 10 : 0;
+  const critMultiplier = isCritical ? 1.3 : 1.0;
+  const sentenceBonus = isEndOfSentence ? 8 : 0;
 
-  const rawDamage = (baseDamage + sentenceBonus) * comboMultiplier * powerScale * critMultiplier * 0.5;
-  const damage = Math.max(3, Math.round(rawDamage));
+  const rawDamage = (baseDamage + sentenceBonus) * comboMultiplier * powerScale * critMultiplier * 0.45;
+  const damage = Math.max(2, Math.round(rawDamage));
 
   return {
     damage,

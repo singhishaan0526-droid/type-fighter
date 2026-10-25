@@ -12,11 +12,42 @@ export function isLanIp(host: string): boolean {
   );
 }
 
+export function normalizeServerUrl(rawUrl: string): string {
+  let trimmed = rawUrl.trim();
+  if (!trimmed) return LOCAL_DEV_BACKEND;
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    trimmed = `http://${trimmed}`;
+  }
+  // If no port specified and it looks like an IP or localhost, add default backend port 3001
+  try {
+    const parsed = new URL(trimmed);
+    if (!parsed.port && (parsed.hostname === 'localhost' || isLanIp(parsed.hostname))) {
+      parsed.port = '3001';
+      return parsed.toString().replace(/\/$/, '');
+    }
+    return trimmed.replace(/\/$/, '');
+  } catch {
+    return trimmed;
+  }
+}
+
 export function resolveServerUrl(): string {
+  if (typeof window !== 'undefined' && window.location) {
+    const params = new URLSearchParams(window.location.search);
+    const serverParam = params.get('server');
+    if (serverParam) {
+      const normalized = normalizeServerUrl(serverParam);
+      if (window.localStorage) {
+        localStorage.setItem('type_fighter_server_url', normalized);
+      }
+      return normalized;
+    }
+  }
+
   // Check user manual override in localStorage
   if (typeof window !== 'undefined' && window.localStorage) {
     const saved = localStorage.getItem('type_fighter_server_url');
-    if (saved) return saved;
+    if (saved) return normalizeServerUrl(saved);
   }
 
   const envUrl =
@@ -37,11 +68,13 @@ export function resolveServerUrl(): string {
       return `http://${host}:3001`;
     }
 
-    // 3. If running on remote hosting (Vercel, Netlify, Render, etc.)
-    return REMOTE_PRODUCTION_BACKEND;
+    // 3. Fallback to same-origin backend
+    if (window.location.port === '5173') {
+      return `http://${host}:3001`;
+    }
   }
 
-  if (envUrl) return envUrl;
+  if (envUrl) return normalizeServerUrl(envUrl);
   return LOCAL_DEV_BACKEND;
 }
 
@@ -54,14 +87,15 @@ export function getServerUrl(): string {
 }
 
 export function setServerUrl(newUrl: string): void {
-  if (activeServerUrl !== newUrl) {
-    activeServerUrl = newUrl;
+  const normalized = normalizeServerUrl(newUrl);
+  if (activeServerUrl !== normalized) {
+    activeServerUrl = normalized;
     if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.setItem('type_fighter_server_url', newUrl);
+      localStorage.setItem('type_fighter_server_url', normalized);
     }
     disconnectSocket();
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('server-url-changed', { detail: newUrl }));
+      window.dispatchEvent(new CustomEvent('server-url-changed', { detail: normalized }));
     }
   }
 }
@@ -71,28 +105,15 @@ export function getSocket(): Socket {
     socket = io(activeServerUrl, {
       autoConnect: false,
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
       reconnectionDelay: 1000,
-      timeout: 10000
+      timeout: 10000,
+      transports: ['websocket', 'polling']
     });
 
-    socket.on('connect_error', () => {
+    socket.on('connect_error', (err) => {
       failedAttempts++;
-      // Auto-failover to cloud backend if local or LAN server is unresponsive
-      if (
-        (activeServerUrl === LOCAL_DEV_BACKEND || activeServerUrl.includes(':3001')) &&
-        failedAttempts >= 3
-      ) {
-        console.warn(
-          `[SocketClient] Local backend (${activeServerUrl}) unreachable. Switching to cloud (${REMOTE_PRODUCTION_BACKEND})`
-        );
-        activeServerUrl = REMOTE_PRODUCTION_BACKEND;
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(
-            new CustomEvent('server-url-changed', { detail: REMOTE_PRODUCTION_BACKEND })
-          );
-        }
-      }
+      console.warn(`[SocketClient] Failed to connect to ${activeServerUrl} (attempt ${failedAttempts}):`, err?.message || err);
     });
 
     socket.on('connect', () => {

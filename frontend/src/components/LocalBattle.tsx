@@ -75,8 +75,8 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
   // Player 1 Fighter State
   const [p1State, setP1State] = useState<FighterState>({
     character: p1Character,
-    maxHp: 250,
-    currentHp: 250,
+    maxHp: 500,
+    currentHp: 500,
     combo: 0,
     maxCombo: 0,
     animation: 'idle',
@@ -95,8 +95,8 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
   // Player 2 / Bot Fighter State
   const [p2State, setP2State] = useState<FighterState>({
     character: p2Character,
-    maxHp: 250,
-    currentHp: 250,
+    maxHp: 500,
+    currentHp: 500,
     combo: 0,
     maxCombo: 0,
     animation: 'idle',
@@ -497,12 +497,12 @@ export const LocalBattle: React.FC<LocalBattleProps> = ({
     const { damage, isCritical } = calculateWordDamage(
       word.length,
       p1State.combo,
-      p1Character.stats.power
+      p1Character.stats.power,
+      isEndOfSentence
     );
 
-    const bonusDamage = isEndOfSentence ? 10 : 0;
-    const hasteMultiplier = p1State.hasHasteBuff ? 1.5 : 1.0;
-    const totalDmg = Math.max(3, Math.round((damage + bonusDamage) * 0.5 * hasteMultiplier));
+    const hasteMultiplier = p1State.hasHasteBuff ? 1.4 : 1.0;
+    const totalDmg = Math.max(2, Math.round(damage * hasteMultiplier));
     const meterGain = isEndOfSentence ? 22 : 12;
 
     // Martial arts rotation: Punch -> Kick -> Weapon Slash -> Signature Unique Move

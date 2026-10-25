@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { CHARACTERS } from '../data/characters';
 import type { Character, GameMode, BotDifficulty } from '../types/game';
 import { sound } from '../utils/sound';
-import { Swords, Gauge, Flame, Wind, Play, Wifi, Sparkles, Globe } from 'lucide-react';
+import { Swords, Gauge, Flame, Wind, Play, Wifi, Sparkles, Globe, Check, Share2, Server } from 'lucide-react';
 import { getServerUrl, setServerUrl, REMOTE_PRODUCTION_BACKEND, LOCAL_DEV_BACKEND } from '../utils/socketClient';
 
 interface CharacterSelectProps {
@@ -18,6 +18,9 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
   const [selectedP2, setSelectedP2] = useState<Character>(CHARACTERS[1]); // Glitch
   const [botDifficulty, setBotDifficulty] = useState<BotDifficulty>('medium');
   const [onlineSessionId, setOnlineSessionId] = useState('arena-1');
+  const [serverUrlInput, setServerUrlInput] = useState(() => getServerUrl());
+  const [showCustomServer, setShowCustomServer] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   const handleSelectP1 = (char: Character) => {
     setSelectedP1(char);
@@ -193,28 +196,50 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
               <div className="online-duel-config">
                 {/* Combat Server Switcher */}
                 <div className="config-row">
-                  <span className="config-title">COMBAT SERVER</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span className="config-title">COMBAT SERVER</span>
+                    <button
+                      type="button"
+                      className="random-session-btn"
+                      onClick={() => setShowCustomServer(!showCustomServer)}
+                    >
+                      {showCustomServer ? 'HIDE CUSTOM IP' : 'ENTER CUSTOM IP'}
+                    </button>
+                  </div>
                   <div className="server-selector-group">
                     <button
                       type="button"
-                      className={`server-toggle-btn ${!getServerUrl().includes('onrender.com') ? 'active' : ''}`}
+                      className={`server-toggle-btn ${getServerUrl() === LOCAL_DEV_BACKEND ? 'active' : ''}`}
                       onClick={() => {
-                        const localTarget =
-                          typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-                            ? `http://${window.location.hostname}:3001`
-                            : LOCAL_DEV_BACKEND;
-                        setServerUrl(localTarget);
+                        setServerUrl(LOCAL_DEV_BACKEND);
+                        setServerUrlInput(LOCAL_DEV_BACKEND);
                         sound.playKeyClick();
                       }}
                     >
                       <Wifi size={14} />
-                      <span>LOCAL WI-FI</span>
+                      <span>THIS PC (LOCALHOST)</span>
                     </button>
+                    {typeof window !== 'undefined' && window.location.hostname !== 'localhost' && (
+                      <button
+                        type="button"
+                        className={`server-toggle-btn ${getServerUrl().includes(window.location.hostname) ? 'active' : ''}`}
+                        onClick={() => {
+                          const lanTarget = `http://${window.location.hostname}:3001`;
+                          setServerUrl(lanTarget);
+                          setServerUrlInput(lanTarget);
+                          sound.playKeyClick();
+                        }}
+                      >
+                        <Server size={14} />
+                        <span>HOST IP ({window.location.hostname})</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       className={`server-toggle-btn ${getServerUrl().includes('onrender.com') ? 'active' : ''}`}
                       onClick={() => {
                         setServerUrl(REMOTE_PRODUCTION_BACKEND);
+                        setServerUrlInput(REMOTE_PRODUCTION_BACKEND);
                         sound.playKeyClick();
                       }}
                     >
@@ -222,6 +247,31 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
                       <span>CLOUD ARENA</span>
                     </button>
                   </div>
+
+                  {showCustomServer && (
+                    <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.4rem' }}>
+                      <input
+                        type="text"
+                        className="online-session-text-input"
+                        style={{ flex: 1, padding: '0.4rem 0.6rem', fontSize: '0.82rem' }}
+                        value={serverUrlInput}
+                        onChange={(e) => setServerUrlInput(e.target.value)}
+                        placeholder="e.g. 192.168.1.15:3001 or http://host:3001"
+                      />
+                      <button
+                        type="button"
+                        className="random-session-btn"
+                        style={{ padding: '0.4rem 0.8rem' }}
+                        onClick={() => {
+                          setServerUrl(serverUrlInput);
+                          sound.playKeyClick();
+                        }}
+                      >
+                        SAVE
+                      </button>
+                    </div>
+                  )}
+
                   <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
                     Active Server: <code style={{ color: 'var(--neon-cyan)' }}>{getServerUrl()}</code>
                   </p>
@@ -231,13 +281,30 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
                 <div className="config-row">
                   <div className="online-session-input-header">
                     <span className="config-title">ROOM SESSION ID</span>
-                    <button
-                      type="button"
-                      className="random-session-btn"
-                      onClick={() => setOnlineSessionId(`arena-${Math.floor(100 + Math.random() * 900)}`)}
-                    >
-                      GENERATE RANDOM
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.4rem' }}>
+                      <button
+                        type="button"
+                        className="random-session-btn"
+                        onClick={() => {
+                          if (typeof window !== 'undefined' && navigator.clipboard) {
+                            const inviteUrl = `${window.location.origin}/?room=${onlineSessionId}&server=${encodeURIComponent(getServerUrl())}`;
+                            navigator.clipboard.writeText(inviteUrl);
+                            setCopiedLink(true);
+                            setTimeout(() => setCopiedLink(false), 2000);
+                          }
+                        }}
+                      >
+                        {copiedLink ? <Check size={12} color="#00f59b" /> : <Share2 size={12} />}
+                        <span>{copiedLink ? 'LINK COPIED!' : 'SHARE LINK'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="random-session-btn"
+                        onClick={() => setOnlineSessionId(`arena-${Math.floor(100 + Math.random() * 900)}`)}
+                      >
+                        RANDOM
+                      </button>
+                    </div>
                   </div>
                   <input
                     id="online-session-input"

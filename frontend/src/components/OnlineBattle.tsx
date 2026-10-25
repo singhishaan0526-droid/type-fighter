@@ -15,7 +15,7 @@ import { BattleHUD } from './BattleHUD';
 import { ShadowArena, type FinishingMoveState } from './ShadowArena';
 import { TypingConsole } from './TypingConsole';
 import { BattleResultModal } from './BattleResultModal';
-import { Wifi, Users, CheckCircle2, RotateCcw, AlertTriangle, Copy, Check, Globe } from 'lucide-react';
+import { Wifi, Users, CheckCircle2, RotateCcw, AlertTriangle, Copy, Check, Globe, Share2 } from 'lucide-react';
 
 interface OnlineBattleProps {
   initialCharacter: Character;
@@ -32,14 +32,15 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
   const [phase, setPhase] = useState<'connecting' | 'waiting' | 'ready' | 'countdown' | 'battle' | 'finished'>('connecting');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [currentServerUrl, setCurrentServerUrl] = useState<string>(getServerUrl());
   const [finishingMove, setFinishingMove] = useState<FinishingMoveState | null>(null);
 
   // Fighter states
   const [p1State, setP1State] = useState<FighterState>({
     character: initialCharacter,
-    maxHp: 100,
-    currentHp: 100,
+    maxHp: 500,
+    currentHp: 500,
     combo: 0,
     maxCombo: 0,
     animation: 'idle',
@@ -57,8 +58,8 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
 
   const [p2State, setP2State] = useState<FighterState>({
     character: CHARACTERS[1],
-    maxHp: 100,
-    currentHp: 100,
+    maxHp: 500,
+    currentHp: 500,
     combo: 0,
     maxCombo: 0,
     animation: 'idle',
@@ -169,9 +170,21 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  // Copy full invite link
+  const handleCopyInviteLink = () => {
+    try {
+      const inviteUrl = `${window.location.origin}/?room=${sessionId}&server=${encodeURIComponent(currentServerUrl)}`;
+      navigator.clipboard.writeText(inviteUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
     }
   };
 
@@ -743,9 +756,14 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
           <div className="online-room-badge-row">
             <span className="room-label">ROOM SESSION:</span>
             <code className="room-code">{sessionId}</code>
-            <button className="copy-session-btn" onClick={handleCopySessionId}>
-              {copied ? 'COPIED!' : 'COPY CODE'}
-            </button>
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <button className="copy-session-btn" onClick={handleCopyInviteLink}>
+                {copiedLink ? 'LINK COPIED!' : 'SHARE LINK'}
+              </button>
+              <button className="copy-session-btn" onClick={handleCopySessionId}>
+                {copied ? 'COPIED!' : 'COPY CODE'}
+              </button>
+            </div>
           </div>
           <div className="connecting-tips">
             <span>Make sure both players are on the same server &amp; room code.</span>
@@ -769,7 +787,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
               </h3>
               <p>
                 {phase === 'waiting'
-                  ? `Share room code "${sessionId}" with Player 2 to join!`
+                  ? `Share invite link or room code "${sessionId}" with Player 2 to join!`
                   : 'Select your shadow warrior and tap Signal Ready.'}
               </p>
             </div>
@@ -780,10 +798,16 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
             <div className="lobby-invite-banner">
               <span className="invite-title">ROOM CODE:</span>
               <span className="invite-code">{sessionId}</span>
-              <button className="lobby-invite-copy-btn" onClick={handleCopySessionId}>
-                {copied ? <Check size={14} color="#00f59b" /> : <Copy size={14} />}
-                <span>{copied ? 'COPIED!' : 'COPY CODE'}</span>
-              </button>
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                <button className="lobby-invite-copy-btn" onClick={handleCopyInviteLink}>
+                  {copiedLink ? <Check size={14} color="#00f59b" /> : <Share2 size={14} />}
+                  <span>{copiedLink ? 'LINK COPIED!' : 'SHARE LINK'}</span>
+                </button>
+                <button className="lobby-invite-copy-btn" onClick={handleCopySessionId}>
+                  {copied ? <Check size={14} color="#00f59b" /> : <Copy size={14} />}
+                  <span>{copied ? 'COPIED!' : 'COPY CODE'}</span>
+                </button>
+              </div>
             </div>
           )}
 

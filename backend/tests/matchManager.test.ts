@@ -137,7 +137,7 @@ describe('MatchManager', () => {
     expect(resWord.attackEvent?.word).toBe('The');
     expect(resWord.attackEvent?.damage).toBeGreaterThan(0);
     // Opponent HP reduced
-    expect(session.p2?.currentHp).toBeLessThan(100);
+    expect(session.p2?.currentHp).toBeLessThan(session.p2?.maxHp ?? 500);
   });
 
   it('rejects stale or duplicate sequence numbers', () => {
@@ -554,7 +554,7 @@ describe('MatchManager', () => {
     expect(session.phase).toBe('ready');
     expect(session.winner).toBeNull();
     expect(session.finishReason).toBeNull();
-    expect(session.p1?.currentHp).toBe(100);
+    expect(session.p1?.currentHp).toBe(session.p1?.maxHp ?? 500);
     expect(session.p1?.combo).toBe(0);
     expect(session.p1?.damageDealt).toBe(0);
     expect(session.p1?.currentTypedIndex).toBe(0);

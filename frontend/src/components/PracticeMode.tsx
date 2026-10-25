@@ -331,7 +331,7 @@ export const PracticeMode: React.FC<PracticeModeProps> = ({ character, onExit })
                 : undefined
           }}
         >
-          {char === ' ' ? '\u00A0' : char}
+          {char}
         </span>
       );
     });

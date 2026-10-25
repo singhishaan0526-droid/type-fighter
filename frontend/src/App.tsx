@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { GameMode, Character, BotDifficulty } from './types/game';
 import { CHARACTERS } from './data/characters';
 import { Navbar } from './components/Navbar';
@@ -27,6 +27,30 @@ export const App: React.FC = () => {
   const [difficulty, setDifficulty] = useState<BotDifficulty>('medium');
   const [onlineSessionId, setOnlineSessionId] = useState('arena-1');
   const [isRecordsOpen, setIsRecordsOpen] = useState(false);
+
+  // Check URL query parameters (?room=... & ?server=...) on load
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location) {
+      const params = new URLSearchParams(window.location.search);
+      const roomParam = params.get('room') || params.get('session');
+      if (roomParam) {
+        const cleanRoom = roomParam.toLowerCase().trim();
+        setOnlineSessionId(cleanRoom);
+        setMode('online-duel');
+        // Auto-login as guest if not logged in yet so user lands straight into the online duel
+        if (!user) {
+          const guestName = `Warrior_${Math.floor(100 + Math.random() * 900)}`;
+          const guestUser: UserProfile = {
+            id: `guest-${Date.now()}`,
+            name: guestName,
+            loginType: 'guest',
+            avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${guestName}`
+          };
+          handleLogin(guestUser);
+        }
+      }
+    }
+  }, []);
 
   const handleLogin = (newUser: UserProfile) => {
     setUser(newUser);

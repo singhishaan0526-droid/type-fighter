@@ -124,11 +124,11 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* User Profile Pill */}
         {user && (
           <div className="navbar-user-chip">
-            <img src={user.avatar} alt={user.name} className="user-chip-avatar" />
+            <img src={user.avatar || (user as any).avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.name}`} alt={user.name} className="user-chip-avatar" />
             <div className="user-chip-info">
               <span className="user-chip-name">{user.name}</span>
-              <span className={`user-chip-badge ${user.loginType}`}>
-                {user.loginType.toUpperCase()}
+              <span className={`user-chip-badge ${user.loginType || 'guest'}`}>
+                {(user.loginType || 'guest').toUpperCase()}
               </span>
             </div>
             {onLogout && (

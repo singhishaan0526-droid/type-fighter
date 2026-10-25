@@ -11,6 +11,7 @@ import type {
   CombatAttackEvent,
   PlayerHealthEvent
 } from '@type-fighter/shared';
+import { COMBAT_CONSTANTS } from '@type-fighter/shared';
 import {
   CHARACTER_POWERS,
   calculateWpm,
@@ -167,8 +168,8 @@ export class MatchManager {
       characterId,
       isReady: false,
       isConnected: true,
-      currentHp: 100,
-      maxHp: 100,
+      currentHp: COMBAT_CONSTANTS.DEFAULT_MAX_HP,
+      maxHp: COMBAT_CONSTANTS.DEFAULT_MAX_HP,
       shieldHp: 0,
       combo: 0,
       maxCombo: 0,
