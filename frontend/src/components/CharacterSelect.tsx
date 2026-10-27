@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { CHARACTERS } from '../data/characters';
 import type { Character, GameMode, BotDifficulty } from '../types/game';
 import { sound } from '../utils/sound';
-import { Swords, Gauge, Flame, Wind, Play, Wifi, Sparkles, Globe, Check, Share2, Server } from 'lucide-react';
-import { getServerUrl, setServerUrl, REMOTE_PRODUCTION_BACKEND, LOCAL_DEV_BACKEND } from '../utils/socketClient';
+import { Swords, Gauge, Flame, Wind, Play, Wifi, Sparkles, Check, Share2 } from 'lucide-react';
 
 interface CharacterSelectProps {
   mode: GameMode;
@@ -18,8 +17,6 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
   const [selectedP2, setSelectedP2] = useState<Character>(CHARACTERS[1]); // Glitch
   const [botDifficulty, setBotDifficulty] = useState<BotDifficulty>('medium');
   const [onlineSessionId, setOnlineSessionId] = useState('arena-1');
-  const [serverUrlInput, setServerUrlInput] = useState(() => getServerUrl());
-  const [showCustomServer, setShowCustomServer] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
   const handleSelectP1 = (char: Character) => {
@@ -194,100 +191,29 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
           <div className="battle-config-card">
             {mode === 'online-duel' ? (
               <div className="online-duel-config">
-                {/* Combat Server Switcher */}
-                <div className="config-row">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span className="config-title">COMBAT SERVER</span>
-                    <button
-                      type="button"
-                      className="random-session-btn"
-                      onClick={() => setShowCustomServer(!showCustomServer)}
-                    >
-                      {showCustomServer ? 'HIDE CUSTOM IP' : 'ENTER CUSTOM IP'}
-                    </button>
+                {/* Serverless P2P Architecture Banner */}
+                <div className="p2p-config-banner">
+                  <div className="p2p-banner-header">
+                    <Wifi size={16} className="text-neon-cyan" />
+                    <span className="p2p-banner-title">SERVERLESS WEBRTC MULTIPLAYER (VERCEL)</span>
                   </div>
-                  <div className="server-selector-group">
-                    <button
-                      type="button"
-                      className={`server-toggle-btn ${getServerUrl() === LOCAL_DEV_BACKEND ? 'active' : ''}`}
-                      onClick={() => {
-                        setServerUrl(LOCAL_DEV_BACKEND);
-                        setServerUrlInput(LOCAL_DEV_BACKEND);
-                        sound.playKeyClick();
-                      }}
-                    >
-                      <Wifi size={14} />
-                      <span>THIS PC (LOCALHOST)</span>
-                    </button>
-                    {typeof window !== 'undefined' && window.location.hostname !== 'localhost' && (
-                      <button
-                        type="button"
-                        className={`server-toggle-btn ${getServerUrl().includes(window.location.hostname) ? 'active' : ''}`}
-                        onClick={() => {
-                          const lanTarget = `http://${window.location.hostname}:3001`;
-                          setServerUrl(lanTarget);
-                          setServerUrlInput(lanTarget);
-                          sound.playKeyClick();
-                        }}
-                      >
-                        <Server size={14} />
-                        <span>HOST IP ({window.location.hostname})</span>
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className={`server-toggle-btn ${getServerUrl().includes('onrender.com') ? 'active' : ''}`}
-                      onClick={() => {
-                        setServerUrl(REMOTE_PRODUCTION_BACKEND);
-                        setServerUrlInput(REMOTE_PRODUCTION_BACKEND);
-                        sound.playKeyClick();
-                      }}
-                    >
-                      <Globe size={14} />
-                      <span>CLOUD ARENA</span>
-                    </button>
-                  </div>
-
-                  {showCustomServer && (
-                    <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.4rem' }}>
-                      <input
-                        type="text"
-                        className="online-session-text-input"
-                        style={{ flex: 1, padding: '0.4rem 0.6rem', fontSize: '0.82rem' }}
-                        value={serverUrlInput}
-                        onChange={(e) => setServerUrlInput(e.target.value)}
-                        placeholder="e.g. 192.168.1.15:3001 or http://host:3001"
-                      />
-                      <button
-                        type="button"
-                        className="random-session-btn"
-                        style={{ padding: '0.4rem 0.8rem' }}
-                        onClick={() => {
-                          setServerUrl(serverUrlInput);
-                          sound.playKeyClick();
-                        }}
-                      >
-                        SAVE
-                      </button>
-                    </div>
-                  )}
-
-                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                    Active Server: <code style={{ color: 'var(--neon-cyan)' }}>{getServerUrl()}</code>
+                  <p className="p2p-banner-desc">
+                    Connect two laptops directly over browser-to-browser WebRTC DataChannels.
+                    Zero backend or Render server required — runs completely on Vercel with ultra-low latency!
                   </p>
                 </div>
 
-                {/* Session ID */}
+                {/* Session ID / Room Code */}
                 <div className="config-row">
                   <div className="online-session-input-header">
-                    <span className="config-title">ROOM SESSION ID</span>
+                    <span className="config-title">ROOM CODE</span>
                     <div style={{ display: 'flex', gap: '0.4rem' }}>
                       <button
                         type="button"
                         className="random-session-btn"
                         onClick={() => {
                           if (typeof window !== 'undefined' && navigator.clipboard) {
-                            const inviteUrl = `${window.location.origin}/?room=${onlineSessionId}&server=${encodeURIComponent(getServerUrl())}`;
+                            const inviteUrl = `${window.location.origin}/?room=${encodeURIComponent(onlineSessionId)}`;
                             navigator.clipboard.writeText(inviteUrl);
                             setCopiedLink(true);
                             setTimeout(() => setCopiedLink(false), 2000);
@@ -300,7 +226,10 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
                       <button
                         type="button"
                         className="random-session-btn"
-                        onClick={() => setOnlineSessionId(`arena-${Math.floor(100 + Math.random() * 900)}`)}
+                        onClick={() => {
+                          setOnlineSessionId(`arena-${Math.floor(100 + Math.random() * 900)}`);
+                          sound.playKeyClick();
+                        }}
                       >
                         RANDOM
                       </button>
@@ -316,19 +245,22 @@ export const CharacterSelect: React.FC<CharacterSelectProps> = ({
                     maxLength={24}
                   />
                   <div className="quick-arena-chips">
-                    {['arena-1', 'arena-2', 'arena-cyber'].map((preset) => (
+                    {['arena-1', 'arena-cyber', 'tokyo-dojo', 'ninja-hall'].map((preset) => (
                       <button
                         key={preset}
                         type="button"
                         className={`arena-chip ${onlineSessionId === preset ? 'active' : ''}`}
-                        onClick={() => setOnlineSessionId(preset)}
+                        onClick={() => {
+                          setOnlineSessionId(preset);
+                          sound.playKeyClick();
+                        }}
                       >
                         {preset}
                       </button>
                     ))}
                   </div>
-                  <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                    Both players (Desktop &amp; Mobile) must enter the <strong>exact same Session ID</strong> and be on the same server to duel.
+                  <p style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+                    Open this room code or share the invite link on your second laptop to duel instantly!
                   </p>
                 </div>
               </div>

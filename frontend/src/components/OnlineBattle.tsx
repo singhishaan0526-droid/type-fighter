@@ -1,21 +1,31 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { Character, FighterState, BattleResult, FloatingText, Particle, PlayerSlot, CombatAnimationState } from '../types/game';
+import type {
+  Character,
+  FighterState,
+  BattleResult,
+  FloatingText,
+  Particle,
+  PlayerSlot,
+  CombatAnimationState
+} from '../types/game';
 import { CHARACTERS, getCharacterById } from '../data/characters';
 import { sound } from '../utils/sound';
-import {
-  connectSocket,
-  getSocket,
-  disconnectSocket,
-  getServerUrl,
-  setServerUrl,
-  REMOTE_PRODUCTION_BACKEND,
-  LOCAL_DEV_BACKEND
-} from '../utils/socketClient';
+import { PeerBattleClient } from '../utils/peerBattleClient';
 import { BattleHUD } from './BattleHUD';
 import { ShadowArena, type FinishingMoveState } from './ShadowArena';
 import { TypingConsole } from './TypingConsole';
 import { BattleResultModal } from './BattleResultModal';
-import { Wifi, Users, CheckCircle2, RotateCcw, AlertTriangle, Copy, Check, Globe, Share2 } from 'lucide-react';
+import {
+  Wifi,
+  CheckCircle2,
+  RotateCcw,
+  Copy,
+  Check,
+  Share2,
+  Swords,
+  ShieldCheck,
+  Zap
+} from 'lucide-react';
 
 interface OnlineBattleProps {
   initialCharacter: Character;
@@ -33,7 +43,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [currentServerUrl, setCurrentServerUrl] = useState<string>(getServerUrl());
+  const [pingMs, setPingMs] = useState<number>(14);
   const [finishingMove, setFinishingMove] = useState<FinishingMoveState | null>(null);
 
   // Fighter states
@@ -57,7 +67,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
   });
 
   const [p2State, setP2State] = useState<FighterState>({
-    character: CHARACTERS[1],
+    character: CHARACTERS[1], // Glitch
     maxHp: 500,
     currentHp: 500,
     combo: 0,
@@ -80,8 +90,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
   const [p2Ready, setP2Ready] = useState(false);
 
   // Challenge and typing state
-  const [currentSentence, setCurrentSentence] = useState('Connecting to online duel arena...');
-  const [challengeId, setChallengeId] = useState('');
+  const [currentSentence, setCurrentSentence] = useState('Initializing serverless battle arena...');
   const [userInput, setUserInput] = useState('');
   const [hasInputError, setHasInputError] = useState(false);
 
@@ -91,34 +100,29 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
   const [battleResult, setBattleResult] = useState<BattleResult | null>(null);
   const [isScreenShaking, setIsScreenShaking] = useState(false);
 
-  // Opponent connection status / Grace period
-  const [opponentConnected, setOpponentConnected] = useState(true);
-  const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
-
   // FX
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
   const [particles, setParticles] = useState<Particle[]>([]);
 
-  // Sequence number ref
-  const seqRef = useRef<number>(1);
-  const socketRef = useRef(getSocket());
+  // Peer client reference
+  const peerClientRef = useRef<PeerBattleClient | null>(null);
   const yourSlotRef = useRef<PlayerSlot>(yourSlot);
-  yourSlotRef.current = yourSlot;
   const p1StateRef = useRef<FighterState>(p1State);
-  p1StateRef.current = p1State;
   const p2StateRef = useRef<FighterState>(p2State);
-  p2StateRef.current = p2State;
-
-  const hasPlayedFinisherRef = useRef<boolean>(false);
-  const finisherTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    return () => {
-      if (finisherTimerRef.current) clearTimeout(finisherTimerRef.current);
-    };
-  }, []);
+    yourSlotRef.current = yourSlot;
+  }, [yourSlot]);
 
-  // Spawn visual FX helper
+  useEffect(() => {
+    p1StateRef.current = p1State;
+  }, [p1State]);
+
+  useEffect(() => {
+    p2StateRef.current = p2State;
+  }, [p2State]);
+
+  // Impact FX generator
   const triggerImpactFX = useCallback((
     target: 'p1' | 'p2',
     text: string,
@@ -178,7 +182,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
   // Copy full invite link
   const handleCopyInviteLink = () => {
     try {
-      const inviteUrl = `${window.location.origin}/?room=${sessionId}&server=${encodeURIComponent(currentServerUrl)}`;
+      const inviteUrl = `${window.location.origin}/?room=${encodeURIComponent(sessionId)}`;
       navigator.clipboard.writeText(inviteUrl);
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
@@ -188,61 +192,28 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
     }
   };
 
-  // Toggle server between local/LAN and cloud Render
-  const isCloudServer = currentServerUrl === REMOTE_PRODUCTION_BACKEND;
-  const toggleServerUrl = () => {
-    const newTarget = isCloudServer
-      ? (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-          ? `http://${window.location.hostname}:3001`
-          : LOCAL_DEV_BACKEND)
-      : REMOTE_PRODUCTION_BACKEND;
-    setServerUrl(newTarget);
-    setCurrentServerUrl(newTarget);
-  };
-
-  // Listen for server URL changes (e.g. from failover or toggle)
+  // Initialize WebRTC Peer-to-Peer Client
   useEffect(() => {
-    const handleUrlChange = (e: Event) => {
-      const customEvent = e as CustomEvent<string>;
-      if (customEvent.detail) {
-        setCurrentServerUrl(customEvent.detail);
-      }
-    };
-    window.addEventListener('server-url-changed', handleUrlChange);
-    return () => window.removeEventListener('server-url-changed', handleUrlChange);
-  }, []);
+    const client = new PeerBattleClient();
+    peerClientRef.current = client;
 
-  // Connect to Socket.IO and register events
-  useEffect(() => {
-    const socket = connectSocket();
-    socketRef.current = socket;
+    client.startHost(sessionId, initialCharacter.id);
 
-    const performJoinOrResume = () => {
-      setErrorMessage(null);
-      const savedToken = sessionStorage.getItem(`typing_reconnect_${sessionId}`);
-      if (savedToken) {
-        socket.emit('match:resume', { sessionId, reconnectToken: savedToken });
-      } else {
-        socket.emit('match:join', {
-          sessionId,
-          characterId: initialCharacter.id
-        });
-      }
-    };
+    // --- REGISTER EVENT LISTENERS ---
+    client.on('host:ready', () => {
+      setYourSlot('player1');
+      setPhase('waiting');
+    });
 
-    if (socket.connected) {
-      performJoinOrResume();
-    } else {
-      socket.on('connect', performJoinOrResume);
-    }
+    client.on('peer:connected', (evt: any) => {
+      console.log('[OnlineBattle] Connected to peer!', evt);
+      setPhase('ready');
+      sound.playKeyClick();
+    });
 
-    // 1. Authoritative Match State Snapshot
-    socket.on('match:state', (snapshot: any) => {
+    client.on('match:state', (snapshot: any) => {
       setYourSlot(snapshot.yourSlot);
       setPhase(snapshot.phase);
-      if (snapshot.reconnectToken) {
-        sessionStorage.setItem(`typing_reconnect_${sessionId}`, snapshot.reconnectToken);
-      }
 
       if (snapshot.p1) {
         const char = getCharacterById(snapshot.p1.characterId);
@@ -278,13 +249,11 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
 
       if (snapshot.challengeText) {
         setCurrentSentence(snapshot.challengeText);
-        setChallengeId(snapshot.challengeId);
       }
       setTimeLeft(snapshot.timeLeft);
     });
 
-    // 2. Player Joined
-    socket.on('player:joined', (evt: any) => {
+    client.on('player:joined', (evt: any) => {
       const char = getCharacterById(evt.characterId);
       if (evt.slot === 'player1') {
         setP1State((prev) => ({ ...prev, character: char }));
@@ -292,12 +261,12 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       } else {
         setP2State((prev) => ({ ...prev, character: char }));
         setP2Ready(evt.isReady);
-        setPhase('ready');
       }
+      setPhase('ready');
+      sound.playKeyClick();
     });
 
-    // 3. Player Character Selected
-    socket.on('player:character', (evt: any) => {
+    client.on('player:character', (evt: any) => {
       const char = getCharacterById(evt.characterId);
       if (evt.slot === 'player1') {
         setP1State((prev) => ({ ...prev, character: char }));
@@ -306,8 +275,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       }
     });
 
-    // 4. Player Ready Status
-    socket.on('player:ready', (evt: any) => {
+    client.on('player:ready', (evt: any) => {
       if (evt.slot === 'player1') {
         setP1Ready(evt.isReady);
       } else {
@@ -315,27 +283,24 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       }
     });
 
-    // 5. Countdown Tick
-    socket.on('match:countdown', (evt: any) => {
+    client.on('match:countdown', (evt: any) => {
       setPhase('countdown');
       setCountdown(evt.secondsRemaining);
       sound.playKeyClick();
     });
 
-    // 6. Match Started
-    socket.on('match:started', (evt: any) => {
+    client.on('match:started', (evt: any) => {
       setPhase('battle');
       setCountdown(0);
       setTimeout(() => setCountdown(null), 600);
       setCurrentSentence(evt.challengeText);
-      setChallengeId(evt.challengeId);
       setTimeLeft(evt.durationSeconds);
       setUserInput('');
+      setBattleResult(null);
       sound.playAttack('staff');
     });
 
-    // 7. Authoritative Typing Progress
-    socket.on('typing:progress', (evt: any) => {
+    client.on('typing:progress', (evt: any) => {
       if (evt.slot === 'player1') {
         setP1State((prev) => ({
           ...prev,
@@ -359,15 +324,14 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       }
     });
 
-    // 8. Combat Attack Event
-    socket.on('combat:attack', (evt: any) => {
+    client.on('combat:attack', (evt: any) => {
       const isAttackerP1 = evt.attackerSlot === 'player1';
       const attackerState = isAttackerP1 ? p1StateRef.current : p2StateRef.current;
       const targetTag = isAttackerP1 ? 'p2' : 'p1';
 
       const moveStep = (evt.combo || 1) % 4;
       let anim: CombatAnimationState = 'punch';
-      let moveLabel = 'PUNCH';
+      let moveLabel = 'STRIKE';
 
       sound.playDash();
       if (evt.isCritical || moveStep === 3) {
@@ -385,7 +349,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
         sound.playAttack(attackerState.character.weaponType);
       } else {
         anim = 'punch';
-        moveLabel = 'FIST STRIKE';
+        moveLabel = 'FIST COMBO';
         sound.playPunch();
       }
 
@@ -415,8 +379,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       }, 420);
     });
 
-    // 9. Authoritative Player Health Update
-    socket.on('player:health', (evt: any) => {
+    client.on('player:health', (evt: any) => {
       if (evt.slot === 'player1') {
         setP1State((prev) => ({
           ...prev,
@@ -434,186 +397,75 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
       }
     });
 
-    // 10. Match Finished
-    socket.on('match:finished', (evt: any) => {
+    client.on('match:timer', (evt: any) => {
+      setTimeLeft(evt.timeLeft);
+    });
+
+    client.on('match:finished', (evt: any) => {
       setPhase('finished');
-      sessionStorage.removeItem(`typing_reconnect_${sessionId}`);
+      setBattleResult({
+        winner: evt.winner,
+        p1Stats: evt.p1Stats,
+        p2Stats: evt.p2Stats,
+        elapsedSeconds: evt.elapsedSeconds
+      });
 
-      const finalizeResult = () => {
-        setFinishingMove(null);
-        setBattleResult({
-          winner: evt.winner,
-          p1Stats: evt.p1Stats,
-          p2Stats: evt.p2Stats,
-          elapsedSeconds: evt.elapsedSeconds
-        });
-
-        if (evt.winner === yourSlotRef.current) {
-          sound.playVictory();
-        } else if (evt.winner !== 'draw') {
-          sound.playError();
-        }
-      };
-
-      if (evt.winner !== 'draw' && !hasPlayedFinisherRef.current) {
-        hasPlayedFinisherRef.current = true;
-        const winningChar = evt.winner === 'player1' ? p1StateRef.current.character : p2StateRef.current.character;
-        const losingChar = evt.winner === 'player1' ? p2StateRef.current.character : p1StateRef.current.character;
-
-        sound.playFinisher(winningChar.id);
-        sound.playFinisherImpact();
-        triggerScreenShake();
-
-        if (evt.winner === 'player1') {
-          setP1State((prev) => ({ ...prev, animation: 'finisher' }));
-          setP2State((prev) => ({ ...prev, animation: 'defeat' }));
-        } else {
-          setP2State((prev) => ({ ...prev, animation: 'finisher' }));
-          setP1State((prev) => ({ ...prev, animation: 'defeat' }));
-        }
-
-        setFinishingMove({
-          winner: evt.winner,
-          winnerChar: winningChar,
-          loserChar: losingChar,
-          step: 'strike',
-          finisherName: winningChar.finisherName,
-          quote: winningChar.finisherQuote
-        });
-
-        finisherTimerRef.current = setTimeout(() => {
-          sound.playVictory();
-          setFinishingMove((prev) => (prev ? { ...prev, step: 'dialogue' } : null));
-
-          finisherTimerRef.current = setTimeout(() => {
-            finalizeResult();
-          }, 2800);
-        }, 1500);
+      if (evt.winner === yourSlotRef.current) {
+        sound.playVictory();
       } else {
-        setP1State((prev) => ({
-          ...prev,
-          animation: evt.winner === 'player1' ? 'victory' : evt.winner === 'player2' ? 'defeat' : 'idle'
-        }));
-        setP2State((prev) => ({
-          ...prev,
-          animation: evt.winner === 'player2' ? 'victory' : evt.winner === 'player1' ? 'defeat' : 'idle'
-        }));
-        finalizeResult();
+        sound.playHit();
       }
     });
 
-    // 11. Connection Status (Disconnect & Reconnect Grace)
-    socket.on('connection:status', (evt: any) => {
-      const isOpponent = evt.slot !== yourSlotRef.current;
-      if (isOpponent) {
-        if (evt.status === 'disconnected') {
-          setOpponentConnected(false);
-          setGraceSeconds(evt.graceSecondsRemaining || 15);
-        } else if (evt.status === 'reconnected') {
-          setOpponentConnected(true);
-          setGraceSeconds(null);
-        }
-      }
+    client.on('peer:ping', (evt: any) => {
+      setPingMs(evt.pingMs || 15);
     });
 
-    // 12. Auto-advancing Challenge on Sentence Completion
-    socket.on('challenge:next', (evt: any) => {
-      if (evt.slot === yourSlotRef.current) {
-        setCurrentSentence(evt.challengeText);
-        setChallengeId(evt.challengeId);
-        setUserInput('');
-        setHasInputError(false);
-      }
-    });
-
-    // 13. Match Errors / Auto-Recovery
-    socket.on('match:error', (err: any) => {
-      // If resume token failed or session not found, automatically clear stale token and join clean
-      if (
-        err.code === 'RESUME_FAILED' ||
-        err.code === 'INVALID_RECONNECT_TOKEN' ||
-        err.code === 'BAD_RESUME_PAYLOAD' ||
-        err.message?.includes('RECONNECT') ||
-        err.message?.includes('SESSION_NOT_FOUND')
-      ) {
-        sessionStorage.removeItem(`typing_reconnect_${sessionId}`);
-        socket.emit('match:join', {
-          sessionId,
-          characterId: initialCharacter.id
-        });
-        return;
-      }
-
-      setErrorMessage(`${err.code}: ${err.message}`);
+    client.on('player:left', () => {
+      setP2Ready(false);
+      setPhase('waiting');
+      setErrorMessage('Opponent disconnected from the duel.');
       setTimeout(() => setErrorMessage(null), 4000);
     });
 
-    // 14. Player Left / Disconnected from Lobby
-    socket.on('player:left', (evt: any) => {
-      if (evt.slot === 'player1') {
-        setP1Ready(false);
-      } else {
-        setP2Ready(false);
-      }
-      setPhase('waiting');
-    });
-
-    // 15. Connection Error Notification
-    socket.on('connect_error', () => {
-      setErrorMessage(`Connecting to duel server (${getServerUrl()})...`);
+    client.on('peer:error', (err: any) => {
+      setErrorMessage(err.message || 'Connection error.');
+      setTimeout(() => setErrorMessage(null), 5000);
     });
 
     return () => {
-      socket.off('connect');
-      socket.off('connect_error');
-      socket.off('match:state');
-      socket.off('player:joined');
-      socket.off('player:character');
-      socket.off('player:ready');
-      socket.off('player:left');
-      socket.off('match:countdown');
-      socket.off('match:started');
-      socket.off('typing:progress');
-      socket.off('combat:attack');
-      socket.off('player:health');
-      socket.off('challenge:next');
-      socket.off('match:finished');
-      socket.off('connection:status');
-      socket.off('match:error');
+      client.cleanup();
+      peerClientRef.current = null;
     };
-  }, [sessionId, initialCharacter.id, currentServerUrl, triggerImpactFX, triggerScreenShake]);
+  }, [sessionId, initialCharacter.id, triggerImpactFX, triggerScreenShake]);
 
-  // Clean exit helper
+  // Clean exit
   const handleExit = useCallback(() => {
-    try {
-      if (socketRef.current) {
-        socketRef.current.emit('match:leave');
-      }
-      sessionStorage.removeItem(`typing_reconnect_${sessionId}`);
-      disconnectSocket();
-    } catch {
-      // safe guard
+    if (peerClientRef.current) {
+      peerClientRef.current.cleanup();
     }
     onExit();
-  }, [sessionId, onExit]);
+  }, [onExit]);
 
-  // Handle Ready Toggle
+  // Ready toggle
   const handleToggleReady = () => {
-    hasPlayedFinisherRef.current = false;
-    if (finisherTimerRef.current) clearTimeout(finisherTimerRef.current);
-    const nextReady = yourSlot === 'player1' ? !p1Ready : !p2Ready;
-    socketRef.current.emit('match:ready', { ready: nextReady });
+    if (!peerClientRef.current) return;
+    const isP1 = yourSlot === 'player1';
+    const nextReady = isP1 ? !p1Ready : !p2Ready;
+    peerClientRef.current.setReady(nextReady);
     sound.playKeyClick();
   };
 
-  // Handle Character Change in Lobby
+  // Character Select in Lobby
   const handleSelectCharacter = (char: Character) => {
     if (phase !== 'waiting' && phase !== 'ready') return;
-    socketRef.current.emit('player:character', { characterId: char.id });
-    sound.playKeyClick();
+    if (peerClientRef.current) {
+      peerClientRef.current.selectCharacter(char.id);
+      sound.playKeyClick();
+    }
   };
 
-  // Handle Live Keystrokes & Incremental Sequence Submission
+  // Handle typing input
   const handleInputChange = (val: string) => {
     if (phase !== 'battle' || battleResult) return;
 
@@ -630,67 +482,105 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
     if (nextCharIndex >= currentSentence.length) return;
 
     const typedChar = val[nextCharIndex];
-
-    const seq = seqRef.current++;
-    socketRef.current.emit('typing:input', {
-      seq,
-      challengeId,
-      index: nextCharIndex,
-      char: typedChar,
-      timestamp: Date.now()
-    });
-
     const isCorrect = currentSentence[nextCharIndex] === typedChar;
+
     setHasInputError(!isCorrect);
+
     if (!isCorrect) {
       sound.playError();
       triggerImpactFX(yourSlot === 'player1' ? 'p1' : 'p2', 'MISS', 'miss', '#ff2a5f');
       setTimeout(() => setHasInputError(false), 250);
-    } else {
-      sound.playKeyClick();
+      return;
     }
 
+    sound.playKeyClick();
     const nextInput = val.slice(0, currentSentence.length);
     setUserInput(nextInput);
+
+    // Compute progress & stats
+    const correctKeystrokes = nextInput.length;
+    const totalKeystrokes = nextInput.length;
+    const currentCombo = (yourSlot === 'player1' ? p1State.combo : p2State.combo) + 1;
+    const elapsedMinutes = Math.max(0.01, (75 - timeLeft) / 60);
+    const liveWpm = Math.round((correctKeystrokes / 5) / elapsedMinutes);
+    const liveAccuracy = 100;
+
+    // Send typing progress
+    if (peerClientRef.current) {
+      peerClientRef.current.sendTypingProgress({
+        correctKeystrokes,
+        totalKeystrokes,
+        combo: currentCombo,
+        maxCombo: Math.max(currentCombo, yourSlot === 'player1' ? p1State.maxCombo : p2State.maxCombo),
+        wpm: liveWpm,
+        accuracy: liveAccuracy
+      });
+    }
+
+    // Check if word completed (space pressed or end of sentence)
+    const isSpace = typedChar === ' ';
+    const isSentenceEnd = nextInput.length >= currentSentence.length;
+
+    if (isSpace || isSentenceEnd) {
+      const words = nextInput.trim().split(/\s+/);
+      const lastWord = words[words.length - 1] || 'strike';
+      if (peerClientRef.current) {
+        peerClientRef.current.sendAttack(lastWord.length, currentCombo, isSentenceEnd);
+      }
+    }
   };
+
+  const handleRematch = () => {
+    if (peerClientRef.current) {
+      peerClientRef.current.requestRematch();
+      sound.playKeyClick();
+    }
+  };
+
+  const isYourSlotReady = yourSlot === 'player1' ? p1Ready : p2Ready;
 
   return (
     <div className="battle-screen-layout online-screen-layout">
-      {/* Online Session Top Navigation & Status Bar */}
-      <div className="online-status-bar">
+      {/* Top Status Command Bar */}
+      <div className="online-status-bar modern-status-bar">
         <div className="online-session-info">
+          {/* Room Pill */}
           <div className="online-pill">
             <Wifi size={13} className="text-neon-cyan" />
-            <span className="online-room-title">ROOM:</span>
+            <span className="online-room-title">P2P ROOM:</span>
             <code className="online-room-id">{sessionId}</code>
-            <button className="copy-session-btn" onClick={handleCopySessionId} title="Copy Session ID">
+            <button
+              type="button"
+              className="copy-session-btn"
+              onClick={handleCopySessionId}
+              title="Copy Room Code"
+            >
               {copied ? <Check size={12} color="#00f59b" /> : <Copy size={12} />}
             </button>
           </div>
 
-          <div className="online-slot-tag">
-            YOU: <strong>{yourSlot === 'player1' ? 'PLAYER 1 (LEFT)' : 'PLAYER 2 (RIGHT)'}</strong>
-          </div>
-
+          {/* Share Link Pill */}
           <button
             type="button"
-            className="online-server-pill-btn"
-            onClick={toggleServerUrl}
-            title="Click to toggle combat server"
+            className="online-share-link-btn"
+            onClick={handleCopyInviteLink}
+            title="Copy Direct Invite Link for Laptop 2"
           >
-            <Globe size={12} className="text-neon-cyan" />
-            <span className="server-dot" />
-            <span className="server-label">{isCloudServer ? 'CLOUD ARENA' : 'LOCAL WI-FI'}</span>
+            <Share2 size={12} />
+            <span>{copiedLink ? 'INVITE COPIED!' : 'SHARE LINK'}</span>
           </button>
-        </div>
 
-        {/* Reconnection Grace Period Warning */}
-        {!opponentConnected && graceSeconds !== null && (
-          <div className="reconnect-grace-alert">
-            <AlertTriangle size={15} />
-            <span>OPPONENT DISCONNECTED. GRACE: {graceSeconds}s</span>
+          {/* Slot indicator */}
+          <div className="online-slot-tag">
+            YOU: <strong>{yourSlot === 'player1' ? 'PLAYER 1 (HOST)' : 'PLAYER 2 (CHALLENGER)'}</strong>
           </div>
-        )}
+
+          {/* Zero-Backend Vercel P2P Pill */}
+          <div className="p2p-badge-pill" title="Direct WebRTC DataChannel (No Render backend required)">
+            <span className="p2p-live-dot" />
+            <span>DIRECT P2P ({pingMs}ms)</span>
+          </div>
+        </div>
 
         {errorMessage && (
           <div className="online-error-toast">
@@ -698,20 +588,25 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
           </div>
         )}
 
-        <button className="navbar-btn outline-btn leave-duel-btn" onClick={handleExit} title="Leave Online Battle">
+        <button
+          type="button"
+          className="navbar-btn outline-btn leave-duel-btn"
+          onClick={handleExit}
+          title="Leave Online Battle"
+        >
           <RotateCcw size={14} />
           <span>LEAVE DUEL</span>
         </button>
       </div>
 
-      {/* Top HUD with HP Bars & Server Match Timer */}
+      {/* Top Combat HUD */}
       <BattleHUD
         p1State={p1State}
         p2State={p2State}
         timeLeft={timeLeft}
       />
 
-      {/* 2D Side-View Shadow Arena */}
+      {/* 2D Shadow Arena */}
       <ShadowArena
         p1State={p1State}
         p2State={p2State}
@@ -743,119 +638,123 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
         }}
       />
 
-      {/* Connecting Chamber Overlay */}
-      {phase === 'connecting' && (
-        <div className="online-lobby-card connecting-card">
-          <div className="online-lobby-header">
-            <Wifi size={28} className="text-neon-cyan animate-pulse" />
-            <div>
-              <h3>CONNECTING TO COMBAT ARENA</h3>
-              <p>Contacting server: {currentServerUrl}...</p>
-            </div>
+      {/* Pre-Match Waiting & Ready Chamber Overlay */}
+      {(phase === 'connecting' || phase === 'waiting' || phase === 'ready') && (
+        <div className="online-lobby-card modern-arcade-lobby">
+          <div className="lobby-brand-badge">
+            <Swords size={16} />
+            <span>VERCEL SERVERLESS COMBAT ARENA</span>
           </div>
-          <div className="online-room-badge-row">
-            <span className="room-label">ROOM SESSION:</span>
-            <code className="room-code">{sessionId}</code>
-            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-              <button className="copy-session-btn" onClick={handleCopyInviteLink}>
-                {copiedLink ? 'LINK COPIED!' : 'SHARE LINK'}
-              </button>
-              <button className="copy-session-btn" onClick={handleCopySessionId}>
-                {copied ? 'COPIED!' : 'COPY CODE'}
-              </button>
-            </div>
-          </div>
-          <div className="connecting-tips">
-            <span>Make sure both players are on the same server &amp; room code.</span>
-            <button type="button" className="switch-server-link" onClick={toggleServerUrl}>
-              Switch to {isCloudServer ? 'Local Wi-Fi Server' : 'Cloud Arena'}
-            </button>
-          </div>
-        </div>
-      )}
 
-      {/* Pre-Match Ready Lobby Overlay if waiting for players */}
-      {(phase === 'waiting' || phase === 'ready') && (
-        <div className="online-lobby-card">
           <div className="online-lobby-header">
-            <Users size={22} className="text-neon-cyan" />
-            <div>
+            <div className="lobby-title-wrap">
               <h3>
-                {phase === 'waiting'
-                  ? 'WAITING FOR OPPONENT...'
-                  : 'WARRIORS ASSEMBLED &bull; PREPARE FOR BATTLE'}
+                {phase === 'connecting'
+                  ? 'ESTABLISHING WEBRTC MESH...'
+                  : phase === 'waiting'
+                  ? 'WAITING FOR CHALLENGER (LAPTOP 2)...'
+                  : 'WARRIORS LOCKED • READY FOR COMBAT'}
               </h3>
               <p>
                 {phase === 'waiting'
-                  ? `Share invite link or room code "${sessionId}" with Player 2 to join!`
-                  : 'Select your shadow warrior and tap Signal Ready.'}
+                  ? 'Open the invite link or type this room code on your second laptop to join directly!'
+                  : 'Select your shadow fighter and hit SIGNAL READY.'}
               </p>
             </div>
           </div>
 
-          {/* Room Invite Share Box */}
-          {phase === 'waiting' && (
-            <div className="lobby-invite-banner">
-              <span className="invite-title">ROOM CODE:</span>
-              <span className="invite-code">{sessionId}</span>
-              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                <button className="lobby-invite-copy-btn" onClick={handleCopyInviteLink}>
-                  {copiedLink ? <Check size={14} color="#00f59b" /> : <Share2 size={14} />}
-                  <span>{copiedLink ? 'LINK COPIED!' : 'SHARE LINK'}</span>
-                </button>
-                <button className="lobby-invite-copy-btn" onClick={handleCopySessionId}>
-                  {copied ? <Check size={14} color="#00f59b" /> : <Copy size={14} />}
-                  <span>{copied ? 'COPIED!' : 'COPY CODE'}</span>
-                </button>
-              </div>
+          {/* 1-Click Invite Banner */}
+          <div className="lobby-invite-banner modern-invite-banner">
+            <div className="invite-meta-left">
+              <span className="invite-label">ROOM CODE:</span>
+              <span className="invite-code-huge">{sessionId}</span>
             </div>
-          )}
 
-          {/* Character selection quick pills */}
+            <div className="invite-actions-right">
+              <button
+                type="button"
+                className="lobby-action-copy-btn primary-copy"
+                onClick={handleCopyInviteLink}
+              >
+                {copiedLink ? <Check size={16} color="#00f59b" /> : <Share2 size={16} />}
+                <span>{copiedLink ? 'LINK COPIED TO CLIPBOARD!' : 'COPY 1-CLICK INVITE LINK'}</span>
+              </button>
+
+              <button
+                type="button"
+                className="lobby-action-copy-btn"
+                onClick={handleCopySessionId}
+              >
+                {copied ? <Check size={14} color="#00f59b" /> : <Copy size={14} />}
+                <span>{copied ? 'CODE COPIED' : 'COPY CODE'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Zero-Backend Explanation Tip */}
+          <div className="lobby-zero-backend-notice">
+            <ShieldCheck size={16} className="text-neon-green" />
+            <span>
+              <strong>Zero Backend Required:</strong> This duel runs 100% on Vercel via direct WebRTC
+              DataChannels between your two laptops. No Render sleeping or disconnection issues!
+            </span>
+          </div>
+
+          {/* In-Lobby Fighter Picker */}
           <div className="lobby-char-selector">
-            <span className="lobby-selector-title">SELECT YOUR WARRIOR</span>
+            <span className="lobby-selector-title">SELECT YOUR SHADOW FIGHTER:</span>
             <div className="lobby-char-pills">
               {CHARACTERS.map((char) => {
-                const isSelected = (yourSlot === 'player1' ? p1State.character.id : p2State.character.id) === char.id;
+                const isSelected =
+                  (yourSlot === 'player1' ? p1State.character.id : p2State.character.id) === char.id;
                 return (
                   <button
                     key={char.id}
+                    type="button"
                     className={`lobby-char-btn ${isSelected ? 'active' : ''}`}
                     onClick={() => handleSelectCharacter(char)}
-                    style={{ borderColor: isSelected ? char.themeColor : 'transparent' }}
+                    style={{
+                      borderColor: isSelected ? char.themeColor : 'rgba(255,255,255,0.08)',
+                      boxShadow: isSelected ? `0 0 15px ${char.accentGlow}` : 'none'
+                    }}
                   >
                     <img src={char.avatarUrl} alt={char.name} className="mini-char-thumb" />
-                    <span className="char-btn-name">{char.name}</span>
+                    <div className="mini-char-info">
+                      <span className="char-btn-name">{char.name}</span>
+                      <span className="char-btn-weapon">{char.weapon}</span>
+                    </div>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Readiness Controls */}
+          {/* Readiness Dashboard */}
           <div className="lobby-readiness-row">
             <div className={`readiness-badge ${p1Ready ? 'ready' : 'waiting'}`}>
               <CheckCircle2 size={16} />
-              <span>PLAYER 1: {p1Ready ? 'READY' : 'CHOOSING...'}</span>
+              <span>PLAYER 1: {p1Ready ? 'READY!' : 'CHOOSING...'}</span>
             </div>
 
             <button
+              type="button"
               id="online-ready-toggle-btn"
-              className={`online-ready-btn ${(yourSlot === 'player1' ? p1Ready : p2Ready) ? 'btn-is-ready' : ''}`}
+              className={`online-ready-btn ${isYourSlotReady ? 'btn-is-ready' : 'pulse-ready'}`}
               onClick={handleToggleReady}
             >
-              {(yourSlot === 'player1' ? p1Ready : p2Ready) ? 'CANCEL READY' : 'SIGNAL READY'}
+              <Zap size={16} />
+              <span>{isYourSlotReady ? 'CANCEL READY' : 'SIGNAL READY'}</span>
             </button>
 
             <div className={`readiness-badge ${p2Ready ? 'ready' : 'waiting'}`}>
               <CheckCircle2 size={16} />
-              <span>PLAYER 2: {p2Ready ? 'READY' : 'CHOOSING...'}</span>
+              <span>PLAYER 2: {p2Ready ? 'READY!' : 'WAITING FOR OPPONENT...'}</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Bottom Typing Console - only during countdown, battle, and finished */}
+      {/* Typing Console during countdown, battle, and finished */}
       {(phase === 'battle' || phase === 'countdown' || phase === 'finished') && (
         <TypingConsole
           sentence={currentSentence}
@@ -874,7 +773,7 @@ export const OnlineBattle: React.FC<OnlineBattleProps> = ({
           result={battleResult}
           p1State={p1State}
           p2State={p2State}
-          onRematch={handleToggleReady}
+          onRematch={handleRematch}
           onCharacterSelect={handleExit}
         />
       )}

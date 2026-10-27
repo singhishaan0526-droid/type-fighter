@@ -90,9 +90,26 @@ export const App: React.FC = () => {
     setPhase('select');
   };
 
+  const handleDirectStart = (
+    newUser: UserProfile,
+    targetMode: GameMode,
+    targetRoomId?: string
+  ) => {
+    handleLogin(newUser);
+    setMode(targetMode);
+    if (targetRoomId) {
+      setOnlineSessionId(targetRoomId);
+    }
+    if (targetMode === 'online-duel') {
+      setPhase('battle');
+    } else {
+      setPhase('select');
+    }
+  };
+
   // If user is not authenticated via Guest or Google, show Landing Page
   if (!user) {
-    return <LandingPage onLogin={handleLogin} />;
+    return <LandingPage onLogin={handleLogin} onDirectStart={handleDirectStart} />;
   }
 
   return (
